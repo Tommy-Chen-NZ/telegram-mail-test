@@ -1,0 +1,110 @@
+services:
+  webhook:
+    profiles: [webhook]
+    build:
+      context: .
+      network: host
+    image: "${MAIL_AGENT_IMAGE:-mail-summary-agent:local}"
+    restart: unless-stopped
+    network_mode: host
+    init: true
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    entrypoint: [python, /app/webhook.py]
+    command: [serve, --bind, "${WEBHOOK_BIND:-0.0.0.0}", --port, "8080"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 64m
+    memswap_limit: 80m
+    cpus: 0.25
+    pids_limit: 16
+    environment:
+      AGENT_DATA: /data
+      AGENT_SECRETS: /run/agent-secrets
+    volumes:
+      - ./data:/data
+      - ./secrets:/run/agent-secrets:ro
+    tmpfs:
+      - /tmp:size=4m,mode=1777
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 1m
+        max-file: "2"
+  agent:
+    build:
+      context: .
+      network: host
+    image: "${MAIL_AGENT_IMAGE:-mail-summary-agent:local}"
+    restart: unless-stopped
+    network_mode: host
+    init: true
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 160m
+    memswap_limit: 224m
+    cpus: 0.75
+    pids_limit: 32
+    stop_grace_period: 45s
+    environment:
+      AGENT_DATA: /data
+      AGENT_SECRETS: /run/agent-secrets
+    volumes:
+      - ./data:/data
+      - ./secrets:/run/agent-secrets:ro
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    healthcheck:
+      test: [CMD, python, /app/mailagent.py, health]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 2m
+        max-file: "3"
+  dashboard:
+    build:
+      context: .
+      network: host
+    image: "${MAIL_AGENT_IMAGE:-mail-summary-agent:local}"
+    restart: unless-stopped
+    network_mode: host
+    init: true
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    entrypoint: [python, /app/dashboard.py]
+    command: [serve, --bind, 127.0.0.1, --port, "8787"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 64m
+    memswap_limit: 80m
+    cpus: 0.25
+    pids_limit: 16
+    environment:
+      AGENT_DATA: /data
+      AGENT_SECRETS: /run/agent-secrets
+    volumes:
+      - ./data:/data
+      - ./secrets:/run/agent-secrets:ro
+    tmpfs:
+      - /tmp:size=4m,mode=1777
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/api/session', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 1m
+        max-file: "2"

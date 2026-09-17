@@ -1,0 +1,13 @@
+.git
+.env
+secrets
+data
+backups
+__pycache__
+tests
+frontend/node_modules
+.preview
+.env.*
+.deploy.lock
+releases
+deployed-image.txt
