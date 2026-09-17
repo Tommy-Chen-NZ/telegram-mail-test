@@ -4,7 +4,7 @@ Gmail → English summary → Telegram. A standard-library Python mail worker, S
 
 Gmail push notifications on port 8080: see [WEBHOOK.md](WEBHOOK.md) for your 8005 → 8080 forwarding setup.
 
-GitHub-hosted builds and manually triggered Compose deployment: see [CI-CD.md](CI-CD.md). Workflow files are prepared; GitHub execution and cand5 deployment still require setup and live verification.
+GitHub builds and publishes images; the server pulls a selected release and updates Docker Compose. See [CI-CD.md](CI-CD.md). No inbound deployment SSH or Actions secrets are required. Live cand5 verification remains pending.
 
 **Target:** cand5, an LXC container nested in KVM. Default Docker networking fails with a sysctl permission error. The user has verified `docker run --rm --network host hello-world` only. Image building, application startup, container access to Gmail/model/Telegram, delivery within 60 seconds, and server reboot recovery remain unverified on cand5.
 

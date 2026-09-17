@@ -1,19 +1,10 @@
-name: Test, build and deploy
+name: Test and publish
 
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
-    inputs:
-      deploy:
-        description: Deploy to cand5 after checks and image publication
-        type: boolean
-        default: false
-      webhook:
-        description: Include the configured Gmail webhook service
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -47,10 +38,16 @@ jobs:
       - name: Validate Compose and deployment scripts
         run: |
           docker compose --profile webhook config --format json | python scripts/check_compose.py
-          bash -n scripts/deploy-via-ssh.sh scripts/deploy-server.sh
+          bash -n scripts/pull-release.sh scripts/deploy-server.sh
           python -m unittest discover -s scripts/tests -v
       - name: Build application image
-        run: docker build --network host -t mail-summary-agent:ci .
+        run: |
+          docker build --network host -t mail-summary-agent:ci .
+          bundle=$(docker create --network host mail-summary-agent:ci)
+          docker cp "$bundle:/opt/deployment/." "$RUNNER_TEMP/deployment"
+          docker rm "$bundle"
+          test -f "$RUNNER_TEMP/deployment/scripts/pull-release.sh"
+          cmp compose.yaml "$RUNNER_TEMP/deployment/compose.yaml"
 
   publish:
     needs: checks
@@ -105,28 +102,3 @@ jobs:
         run: |
           printf 'Image: `%s@%s`\n' "$IMAGE" "$DIGEST" >> "$GITHUB_STEP_SUMMARY"
 
-  deploy:
-    needs: [checks, publish]
-    if: github.event_name == 'workflow_dispatch' && inputs.deploy && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    environment: cand5
-    concurrency:
-      group: cand5-deployment
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - name: Deploy over verified SSH
-        env:
-          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
-          DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
-          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
-          DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
-          DEPLOY_PROJECT: ${{ vars.DEPLOY_PROJECT || 'telegram-mail-test' }}
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
-          IMAGE: ${{ needs.publish.outputs.image }}@${{ needs.publish.outputs.digest }}
-          ENABLE_WEBHOOK: ${{ inputs.webhook }}
-        run: bash scripts/deploy-via-ssh.sh

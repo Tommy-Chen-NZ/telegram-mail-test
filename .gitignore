@@ -9,5 +9,6 @@ node_modules/
 .preview/
 .env.*
 .deploy.lock
+.pull.lock
 releases/
 deployed-image.txt

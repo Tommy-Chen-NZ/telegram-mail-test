@@ -1,86 +1,77 @@
-# GitHub Actions
+# Server-pull deployment
 
-Repository: `Tommy-Chen-NZ/telegram-mail-test`.
+GitHub Actions tests the application, builds React and publishes AMD64/ARM64 images. The server pulls a selected release; GitHub never connects to cand5. No SSH secrets, deployment environment variables, or self-hosted runner are needed. The old cand5 environment can remain unused.
 
-The workflow runs on GitHub. Check the Actions page for the status of each revision. Deployment to cand5 requires the environment variables, SSH secrets, and server preparation below.
+Push to main or run **Test and publish** manually. Wait for both checks and publish to pass. Use the exact image digest from that run's summary (preferred), or its full `sha-COMMIT` tag. There is no automatic latest-version rollout.
 
-## Workflow
+## 1. Registry login
 
-`.github/workflows/ci.yml` runs tests, builds React, validates host-network Compose settings, and builds the application image on GitHub-hosted Ubuntu runners.
+Create a GitHub personal access token **(classic)** with only `read:packages` and an expiry date. Enter it at the Docker password prompt, not in a command, source file, or chat. It grants access to images, not private Git source.
 
-- Pull request: checks and build only; no production secrets or deployment.
-- Push to `main`: checks, then publishes AMD64 and ARM64 images to `ghcr.io/tommy-chen-nz/telegram-mail-test:sha-COMMIT`.
-- Manual run on `main`, with `deploy` checked: checks and publishes that revision, then deploys the resulting immutable image digest to cand5 over SSH.
-- Deployment uses the `cand5` environment and a concurrency lock. It does not run a self-hosted Actions runner on the 512 MiB VPS.
-
-## One-time server preparation
-
-Complete the initial manual deployment and service checks in [CAND5.md](CAND5.md) before enabling CD. Keep `data/`, `secrets/`, `.env`, and `compose.yaml` in one stable directory, for example `/home/USER/telegram-mail-test`.
-
-The deployment user needs Python 3, Bash, `flock`, Docker Compose v2 supporting `up --wait`, and noninteractive access to Docker: either direct access or `sudo -n docker`. Docker access is effectively root access; use a dedicated deployment SSH key. Install its public key in the account's `authorized_keys`. The private key remains a GitHub environment secret.
-
-Private GHCR images require a one-time registry login on cand5 under the same Docker account used by deployment. Use a GitHub token with `read:packages`, entered interactively:
+On cand5, using the account that will own the project:
 
 ```sh
-read -r -p 'GitHub username: ' REGISTRY_USER
-read -r -s -p 'Package read token: ' REGISTRY_TOKEN
-printf '\n'
-printf '%s' "$REGISTRY_TOKEN" | sudo docker login ghcr.io -u "$REGISTRY_USER" --password-stdin
-unset REGISTRY_TOKEN
+if docker info >/dev/null 2>&1; then
+  docker login ghcr.io -u Tommy-Chen-NZ
+else
+  sudo docker login ghcr.io -u Tommy-Chen-NZ
+fi
 ```
 
-If the deployment user uses Docker without sudo, omit sudo when logging in. A public GHCR image can be pulled without this token. Application API keys and the SQLite database never go into GitHub.
+Password means the token, not the GitHub account password. Expected: `Login Succeeded`. Docker retains the registry credential in that Docker account's configuration; keep it protected and renew the token before expiry. Application credentials remain in `secrets/` on cand5.
 
-## GitHub environment configuration
+## 2. First installation
 
-In repository Settings → Environments, create **cand5**. Restrict deployment branches to `main`. Optional reviewer protection depends on repository visibility and your GitHub plan.
+Use a new directory. For an existing installation, preserve its data, secrets, .env and Compose project name and use the update procedure instead. Ubuntu needs Python 3, Bash, tar, flock and Docker Compose v2 with `up --wait`. No Node or Git is needed on the server.
 
-Add these **environment secrets**:
+Set IMAGE to the complete digest shown by the successful Actions run, then extract its deployment bundle. Run this in Bash; replace the example image before running:
 
-| Name | Value |
-| --- | --- |
-| `SSH_PRIVATE_KEY` | Dedicated deployment key, without an interactive passphrase |
-| `SSH_KNOWN_HOSTS` | Verified SSH host-key entry for cand5's externally reachable host and SSH port |
+```sh
+IMAGE='ghcr.io/tommy-chen-nz/telegram-mail-test@sha256:REPLACE_WITH_DIGEST'
+mkdir -p ~/telegram-mail-test
+cd ~/telegram-mail-test
+if docker info >/dev/null 2>&1; then engine=(docker); else engine=(sudo docker); fi
+"${engine[@]}" pull "$IMAGE"
+container=$("${engine[@]}" create --network host "$IMAGE")
+"${engine[@]}" cp "$container:/opt/deployment/." - | tar --no-same-owner -xf -
+"${engine[@]}" rm "$container"
+bash scripts/pull-release.sh "$IMAGE" prepare
+```
 
-Verify the host-key fingerprint using a trusted server console or an existing trusted SSH connection. For a nonstandard port, the known_hosts entry uses `[HOST]:PORT`. The workflow enforces host-key checking; it does not blindly trust `ssh-keyscan` output.
+Expected: `PULL_READY`. The temporary container is never started. The script pins the downloaded digest in .env and prepares data, secrets and backups with private permissions. No application services start yet. An existing .env prevents preparation from being run twice.
 
-Add these **environment variables**:
+## 3. Verify Telegram first
 
-| Name | Value |
-| --- | --- |
-| `DEPLOY_HOST` | Public SSH hostname or IPv4 address reachable from GitHub runners |
-| `DEPLOY_PORT` | External SSH port, default `22`; not the webhook port 8005 |
-| `DEPLOY_USER` | SSH deployment account |
-| `DEPLOY_DIR` | Absolute existing project directory, without spaces or `..` |
-| `DEPLOY_PROJECT` | Existing Compose project name, default `telegram-mail-test` |
+In that same directory:
 
-Find the existing project name with `sudo docker compose ls`. Keep it unchanged to avoid creating a second deployment against the same database and host ports.
+```sh
+python3 mailagent.py setup-telegram
+sudo docker compose run --rm --no-deps --no-build agent verify-telegram
+```
 
-Gmail, model, Telegram, and OAuth credentials stay in the server's `secrets/` directory. Do not add those credentials as Actions secrets.
+Expected: `TELEGRAM_SEND_OK` and an actual test message in Telegram. Enter the bot token only at the hidden setup prompt. Continue with Gmail, model, and dashboard setup in [CAND5.md](CAND5.md), skipping its local build step because the image is already downloaded. Start the services only after credential verification succeeds. Gmail Pub/Sub setup is documented in [WEBHOOK.md](WEBHOOK.md).
 
-## First run
+```sh
+bash scripts/pull-release.sh "$IMAGE" deploy
+```
 
-Commit and push the prepared files to `main`. In Actions, open **Test, build and deploy**. Confirm the checks and image publication pass before configuring live deployment.
+Expected: `DEPLOY_OK` and healthy services. Use `deploy true` only after configuring the webhook. All services use host networking, no ports mapping, persistent SQLite, read-only mounted credentials, and restart unless-stopped. The dashboard stays on loopback port 8787; the webhook uses 8080.
 
-Then choose **Run workflow**, select `main`, and check `deploy`. Check `webhook` only after its server configuration is complete. A webhook already running in the same Compose project is retained even if the checkbox is off.
+## 4. Subsequent updates
 
-The server downloads the image instead of building it. Host networking, restart policies, persistent data, read-only credentials, dashboard loopback binding, and webhook port 8080 remain unchanged.
+Wait for the desired Actions run to pass, copy its image digest, then run on cand5:
 
-## Deployment and rollback
+```sh
+cd ~/telegram-mail-test
+bash scripts/pull-release.sh 'ghcr.io/tommy-chen-nz/telegram-mail-test@sha256:REPLACE_WITH_DIGEST' deploy
+```
 
-Each deployment:
+The script extracts the Compose file and deployment tools from that exact image, snapshots SQLite, updates services without building, and waits for health checks. It keeps an existing running webhook enabled. For a nondefault existing Compose project, use `deploy false EXISTING_PROJECT` (or `deploy true EXISTING_PROJECT` to enable the webhook).
 
-1. Acquires a server-side lock and records the previous effective Compose configuration.
-2. Creates a consistent SQLite snapshot under `backups/deploy-TIMESTAMP-COMMIT/`.
-3. Pulls the tested image by digest and starts the selected services with `--no-build`.
-4. Waits up to 180 seconds for health checks.
-5. On success, writes `MAIL_AGENT_IMAGE` into `.env` and updates the root Compose file. Future manual Compose commands use that image.
-6. On health failure, stops the failed release and attempts to restore the previous configuration for services that were running before the update.
+On a failed rollout it attempts to restore the previous code and running services, without restoring an older database that could replay notifications. Look for `ROLLBACK_OK` or `ROLLBACK_FAILED`; either still means the update failed. Old images and backups are retained. Monitor disk space and copy SQLite snapshots off-host. Incompatible future schema changes require a migration plan.
 
-Automatic rollback changes code only, never the live database. Restoring an older mail database could replay already-delivered notifications. Future incompatible schema changes need a separately reviewed migration/rollback plan. Old images and backups are retained; monitor disk space and archive backups off-host.
+Do not extract a bundle directly over an existing deployment; use pull-release.sh so rollback retains the previous Compose configuration. After updating, the terminal setup tools are refreshed alongside the chosen application release.
 
-Expected success marker: `DEPLOY_OK`. A failed release exits unsuccessfully even if `ROLLBACK_OK` follows. If rollback also fails, inspect the services and the retained backup before another deployment.
+Pipeline success does not verify cand5 network access, its memory limits, 60-second delivery or reboot recovery. Complete the live tests in [CAND5.md](CAND5.md). Updates are manual for now; no timer is installed.
 
-Pipeline success does not prove 60-second delivery or reboot recovery on cand5. Those remain separate live tests.
-
-References: [Publishing Docker images](https://docs.github.com/en/actions/tutorials/publish-packages/publish-docker-images), [Deployment environments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).
+Reference: [GitHub Container registry authentication](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
