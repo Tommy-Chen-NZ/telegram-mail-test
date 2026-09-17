@@ -46,10 +46,12 @@ In that same directory:
 
 ```sh
 python3 mailagent.py setup-telegram
-sudo docker compose run --rm --no-deps --no-build agent verify-telegram
+sudo docker compose run --rm --no-deps agent verify-telegram
 ```
 
 Expected: `TELEGRAM_SEND_OK` and an actual test message in Telegram. Enter the bot token only at the hidden setup prompt. Continue with Gmail, model, and dashboard setup in [CAND5.md](CAND5.md), skipping its local build step because the image is already downloaded. Start the services only after credential verification succeeds. Gmail Pub/Sub setup is documented in [WEBHOOK.md](WEBHOOK.md).
+
+`docker compose run` does not accept `--no-build`; use that flag only with supported commands such as `up`. If Gmail setup reports `verify_telegram_first`, rerun the Telegram verification above from the project directory and confirm `TELEGRAM_SEND_OK` before continuing. Saving a bot token alone does not record a successful verification.
 
 ```sh
 bash scripts/pull-release.sh "$IMAGE" deploy
