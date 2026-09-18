@@ -42,12 +42,12 @@ If resources already exist, reuse them and skip their create commands. The subsc
 
 ## 2. Configure and start the receiver
 
-Upload `webhook.py`, `requirements.txt`, and the updated Dockerfile, Compose file, and Python files to the VPS. Complete Telegram/Gmail/model setup from README first.
+Use the image and deployment bundle installed through [CI-CD.md](CI-CD.md). It already contains the webhook receiver and its dependencies; do not build on cand5. Complete Telegram/Gmail/model setup first. Configure the receiver from the existing project directory:
 
 ```sh
+cd ~/telegram-mail-test
 python3 webhook.py setup
-sudo docker compose build agent
-sudo docker compose --profile webhook up -d --no-build
+sudo docker compose --profile webhook up -d --no-build webhook
 curl -i http://127.0.0.1:8080/healthz
 ```
 
@@ -83,7 +83,7 @@ python3 webhook.py setup-watch
 sudo docker compose --profile webhook run --rm --no-deps webhook watch
 ```
 
-Expected: `GMAIL_OAUTH_CONFIG_OK`, then `GMAIL_WATCH_OK`. Gmail sends an initial notification when watch succeeds. The running receiver checks for renewal every five minutes and renews daily. Credentials are read from the mounted secret directory; they are never logged. A separately managed watch is supported by omitting `setup-watch`.
+Expected: `GMAIL_OAUTH_CONFIG_OK`, then `GMAIL_WATCH_OK`. Gmail sends an initial notification when watch succeeds. The running receiver checks for renewal every five minutes and renews daily. Credentials are read from the mounted secret directory; they are never logged. A separately managed watch is supported by omitting `setup-watch`. An IMAP app password and a Gemini API key cannot substitute for the Gmail OAuth credentials.
 
 ## 5. Verify delivery
 
