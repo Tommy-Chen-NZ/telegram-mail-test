@@ -98,6 +98,12 @@ sudo docker compose logs --tail=20 webhook
 
 Expected: a `gmail_webhook_received` event in the console Logs, `webhook_pending` returning to zero, and the email reaching `sent` with a Telegram message ID. `gmail_watch_expiration` should be in the future. Pending notifications and processing state survive container restarts and SQLite backups.
 
+The receiver writes `gmail_webhook_accepted` (HTTP 204 after commit) or `gmail_webhook_rejected` to Docker logs. Rejections include only the HTTP status, a fixed error code, and an `authenticated` flag. No tokens, headers, notification payloads, or email addresses are logged. For example, `invalid_subscription` or `unexpected_mailbox` identifies a configuration mismatch; `invalid_pubsub_data` or `invalid_history_id` identifies a malformed notification. `unsupported_transfer_encoding` identifies an unsupported request framing. The flag becomes true only after the Google token passes verification; false can also mean a request was rejected before verification.
+
+History IDs supplied as JSON integers or decimal strings are stored exactly as text. Boolean, floating-point, and malformed IDs are rejected. This does not change the IMAP checkpoint or weaken token, subscription, or mailbox validation.
+
+For repeated failures, inspect `pubsub.googleapis.com/subscription/push_request_count` in Cloud Monitoring, grouped by `response_code` and `response_class`, then compare the receiver logs. The default subscription dashboard might not include this chart. A backlog or a Telegram delivery alone does not prove that a push notification was accepted. Pub/Sub retries rejected notifications; do not purge the subscription while diagnosing.
+
 Local tests use generated test keys and mocked Google APIs. They do not establish public reachability, Google authorization, or live end-to-end latency.
 
 Sources: [Gmail push setup and renewal](https://developers.google.com/workspace/gmail/api/guides/push), [Pub/Sub authentication](https://docs.cloud.google.com/pubsub/docs/authenticate-push-subscriptions).

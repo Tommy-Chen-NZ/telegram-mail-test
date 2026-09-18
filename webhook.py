@@ -15,6 +15,14 @@ from urllib.parse import urlsplit
 import mailagent as a
 
 STOP = threading.Event()
+RESPONSE_CODES = frozenset({
+    'not_found', 'invalid_content_type', 'unsupported_transfer_encoding',
+    'invalid_payload_size', 'unauthorized', 'verification_unavailable',
+    'invalid_subscription', 'invalid_pubsub_message', 'invalid_pubsub_data',
+    'invalid_history_id', 'invalid_mailbox', 'unexpected_mailbox',
+    'invalid_payload', 'temporarily_unavailable',
+    'missing_or_invalid_webhook', 'missing_or_invalid_gmail',
+})
 
 
 def setup():
@@ -142,14 +150,21 @@ def ingest(db, envelope, cfg):
         if (not isinstance(message_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,200}', message_id)
                 or not isinstance(encoded, str) or len(encoded) > 8192):
             raise ValueError()
-        payload = json.loads(base64.b64decode(encoded + '=' * (-len(encoded) % 4), altchars=b'-_', validate=True))
-        email, history = payload['emailAddress'], payload['historyId']
-        if not isinstance(history, str) or not re.fullmatch(r'\d{1,40}', history):
-            raise ValueError()
-        if not isinstance(email, str):
-            raise ValueError()
     except (KeyError, TypeError, ValueError):
         raise a.Failure('invalid_pubsub_message') from None
+    try:
+        payload = json.loads(base64.b64decode(encoded + '=' * (-len(encoded) % 4), altchars=b'-_', validate=True))
+        email, history = payload['emailAddress'], payload['historyId']
+    except (KeyError, TypeError, ValueError):
+        raise a.Failure('invalid_pubsub_data') from None
+    # JSON producers can encode IDs as integers or decimal strings. Keep the
+    # exact value as text in SQLite; reject bools and floats instead of coercing.
+    if type(history) is int:
+        history = str(history)
+    if not isinstance(history, str) or not re.fullmatch(r'[0-9]{1,40}', history):
+        raise a.Failure('invalid_history_id')
+    if not isinstance(email, str):
+        raise a.Failure('invalid_mailbox')
     if email.strip().lower() != a.secret('gmail')['email'].strip().lower():
         raise a.Failure('unexpected_mailbox')
     with db:
@@ -185,6 +200,15 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def respond(self, status, code=None):
+        # Only fixed codes and flags may reach logs or response bodies. Never
+        # include headers, tokens, payloads, mailbox addresses, or exceptions.
+        if code is not None and code not in RESPONSE_CODES:
+            status, code = 503, 'temporarily_unavailable'
+        if self.command == 'POST' and self.path == '/webhooks/gmail':
+            fields = {'status': status, 'authenticated': getattr(self, 'authenticated', False)}
+            if code:
+                fields['code'] = code
+            a.log('gmail_webhook_accepted' if status == 204 else 'gmail_webhook_rejected', **fields)
         body = json.dumps({'error': code}).encode() if code else b''
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
@@ -198,18 +222,21 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(200 if self.path == '/healthz' else 404)
 
     def do_POST(self):
+        self.authenticated = False
         if self.path != '/webhooks/gmail':
             return self.respond(404, 'not_found')
         try:
             cfg = a.secret('webhook')
-            if (self.headers.get('Content-Type', '').split(';')[0] != 'application/json'
-                    or self.headers.get('Transfer-Encoding')):
+            if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
                 return self.respond(400, 'invalid_content_type')
+            if self.headers.get('Transfer-Encoding'):
+                return self.respond(400, 'unsupported_transfer_encoding')
             length = int(self.headers.get('Content-Length', '0'))
             if not 0 < length <= 16384:
                 return self.respond(413, 'invalid_payload_size')
             raw = self.rfile.read(length)
             self.server.verifier(self.headers.get('Authorization', ''), cfg)
+            self.authenticated = True
             envelope = json.loads(raw)
             with contextlib.closing(a.connect()) as db:
                 ingest(db, envelope, cfg)

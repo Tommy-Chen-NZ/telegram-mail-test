@@ -1,5 +1,6 @@
 import base64
 import contextlib
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -45,6 +46,26 @@ class WebhookTests(unittest.TestCase):
         self.assertIsNone(self.db.execute('SELECT processed FROM webhook_events').fetchone()[0])
         self.assertIsNone(a.meta(self.db, 'cursor'))
 
+    def test_integer_and_string_history_ids_preserve_precision_and_deduplicate(self):
+        history = 18446744073709551615
+        w.ingest(self.db, self.payload(history=history), self.cfg)
+        self.db.close()
+        self.db = a.connect()
+        w.ingest(self.db, self.payload(history=str(history)), self.cfg)
+        row = self.db.execute('SELECT history_id, typeof(history_id) FROM webhook_events').fetchone()
+        self.assertEqual(tuple(row), (str(history), 'text'))
+        self.assertEqual(self.db.execute('SELECT count(*) FROM webhook_events').fetchone()[0], 1)
+        self.assertIsNone(a.meta(self.db, 'cursor'))
+
+    def test_invalid_history_ids_do_not_enqueue_or_advance_progress(self):
+        for history in [True, False, None, 1.5, 1.0, -1, [], {}, '', '1e3',
+                        '12.0', '-1', ' 99', '\u0661', '9' * 41, 10 ** 40]:
+            with self.subTest(history=history):
+                with self.assertRaisesRegex(a.Failure, 'invalid_history_id'):
+                    w.ingest(self.db, self.payload(history=history), self.cfg)
+        self.assertEqual(self.db.execute('SELECT count(*) FROM webhook_events').fetchone()[0], 0)
+        self.assertIsNone(a.meta(self.db, 'cursor'))
+
     def test_wrong_mailbox_subscription_and_malformed_payload_rejected(self):
         for payload in [self.payload(email='other@example.com'), self.payload(history='not-a-number'),
                         {**self.payload(), 'subscription':'projects/other/subscriptions/test'},
@@ -81,6 +102,65 @@ class WebhookTests(unittest.TestCase):
             server.shutdown()
             worker.join()
             server.server_close()
+
+    def test_http_diagnostics_identify_rejection_stage_without_logging_secrets(self):
+        canary = 'private-token-and-payload-do-not-log'
+        def verify(header, cfg):
+            if header != 'Bearer ' + canary:
+                raise a.Failure('unauthorized')
+        server = w.Server(('127.0.0.1', 0), verifier=verify)
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        def post(payload, auth=True, **extra):
+            headers = {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + canary if auth else ''}
+            headers.update(extra)
+            request = urllib.request.Request(f'http://127.0.0.1:{server.server_port}/webhooks/gmail',
+                data=json.dumps(payload).encode(), headers=headers)
+            try:
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    return response.status, response.read()
+            except urllib.error.HTTPError as error:
+                with error:
+                    return error.code, error.read()
+        output = io.StringIO()
+        cases = [
+            (self.payload(), False, {}, 401, 'unauthorized', False),
+            (self.payload(), True, {'Content-Type': 'text/plain'}, 400, 'invalid_content_type', False),
+            (self.payload(), True, {'Transfer-Encoding': 'chunked'}, 400, 'unsupported_transfer_encoding', False),
+            ({**self.payload(), 'subscription': canary}, True, {}, 400, 'invalid_subscription', True),
+            ({'subscription': self.cfg['subscription'], 'message': {'data': canary}}, True, {}, 400, 'invalid_pubsub_message', True),
+            ({'subscription': self.cfg['subscription'], 'message': {'messageId': '1', 'data': '!'}}, True, {}, 400, 'invalid_pubsub_data', True),
+            (self.payload(history=canary), True, {}, 400, 'invalid_history_id', True),
+            (self.payload(email=canary), True, {}, 400, 'unexpected_mailbox', True),
+        ]
+        with contextlib.redirect_stdout(output):
+            try:
+                for payload, auth, headers, status, code, authenticated in cases:
+                    with self.subTest(code=code):
+                        actual, body = post(payload, auth, **headers)
+                        self.assertEqual((actual, json.loads(body)), (status, {'error': code}))
+                        record = json.loads(output.getvalue().splitlines()[-1])
+                        self.assertEqual(record['authenticated'], authenticated)
+                        self.assertEqual((record['event'], record['status'], record['code']),
+                                         ('gmail_webhook_rejected', status, code))
+                self.assertEqual(self.db.execute('SELECT count(*) FROM webhook_events').fetchone()[0], 0)
+                # Even an unexpected failure containing secret text must not leak.
+                with patch.object(w, 'ingest', side_effect=a.Failure(canary)):
+                    status, body = post(self.payload())
+                    self.assertEqual((status, json.loads(body)), (503, {'error': 'temporarily_unavailable'}))
+                self.assertEqual(post(self.payload(history=99)), (204, b''))
+                self.assertEqual(post(self.payload(history='99')), (204, b''))
+                self.assertEqual(self.db.execute('SELECT count(*) FROM webhook_events').fetchone()[0], 1)
+                record = json.loads(output.getvalue().splitlines()[-1])
+                self.assertEqual((record['event'], record['status'], record['authenticated']),
+                                 ('gmail_webhook_accepted', 204, True))
+            finally:
+                server.shutdown()
+                worker.join()
+                server.server_close()
+        for private in [canary, self.cfg['audience'], self.cfg['service_account'], self.cfg['subscription'],
+                        'test@example.com', self.payload()['message']['data']]:
+            self.assertNotIn(private, output.getvalue())
 
     def test_successful_poll_marks_notification_processed(self):
         w.ingest(self.db,self.payload(),self.cfg)
