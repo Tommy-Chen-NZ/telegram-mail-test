@@ -40,6 +40,11 @@ jobs:
           docker compose --profile webhook config --format json | python scripts/check_compose.py
           bash -n scripts/pull-release.sh scripts/deploy-server.sh
           python -m unittest discover -s scripts/tests -v
+      - name: Validate ngrok configuration without connecting an account
+        run: |
+          docker compose -f compose.ngrok.yaml config --format json | python scripts/check_ngrok.py "$RUNNER_TEMP/ngrok-test"
+          image=$(docker compose -f compose.ngrok.yaml config --images)
+          docker run --rm --network host --read-only -v "$RUNNER_TEMP/ngrok-test:/run/ngrok:ro" "$image" config check --config /run/ngrok/config.yml
       - name: Build application image
         run: |
           docker build --network host -t mail-summary-agent:ci .
@@ -48,6 +53,8 @@ jobs:
           docker rm "$bundle"
           test -f "$RUNNER_TEMP/deployment/scripts/pull-release.sh"
           cmp compose.yaml "$RUNNER_TEMP/deployment/compose.yaml"
+          cmp compose.ngrok.yaml "$RUNNER_TEMP/deployment/compose.ngrok.yaml"
+          test -f "$RUNNER_TEMP/deployment/ngrok_setup.py"
 
   publish:
     needs: checks

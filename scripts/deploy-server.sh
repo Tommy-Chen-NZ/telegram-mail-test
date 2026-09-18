@@ -89,6 +89,9 @@ os.chmod(temporary, 0o600)
 os.replace(temporary, path)
 PY
 cp "$release/compose.yaml" "$root/compose.yaml"
+for helper in compose.ngrok.yaml ngrok_setup.py; do
+  if [[ -f "$release/$helper" ]]; then cp "$release/$helper" "$root/$helper"; fi
+done
 printf '%s\n' "$image" > "$root/deployed-image.txt"
 echo 'DEPLOY_OK'
 "${engine[@]}" compose --project-directory "$root" --env-file "$root/.env" -p "$project" \

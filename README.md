@@ -6,6 +6,8 @@ Gmail push notifications on port 8080: see [WEBHOOK.md](WEBHOOK.md) for your 800
 
 GitHub builds and publishes images; the server pulls a selected release and updates Docker Compose. See [CI-CD.md](CI-CD.md). No inbound deployment SSH or Actions secrets are required. Live cand5 verification remains pending.
 
+For a fixed HTTPS Pub/Sub endpoint through ngrok, see [NGROK.md](NGROK.md).
+
 **Target:** cand5, an LXC container nested in KVM. Default Docker networking fails with a sysctl permission error. The user has verified `docker run --rm --network host hello-world` only. Image building, application startup, container access to Gmail/model/Telegram, delivery within 60 seconds, and server reboot recovery remain unverified on cand5.
 
 All Compose services use `network_mode: host` and share cand5's network namespace, not the outer KVM host's network. There are no `ports` mappings. Build steps also request host networking. The dashboard binds directly to `127.0.0.1:8787`; the webhook binds to `${WEBHOOK_BIND:-0.0.0.0}:8080`. SQLite persists in `./data`; credentials remain read-only at `/run/agent-secrets`. See [CAND5.md](CAND5.md) for staged host checks.

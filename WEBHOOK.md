@@ -1,5 +1,7 @@
 # Gmail webhook
 
+For the selected ngrok HTTPS ingress, start with [NGROK.md](NGROK.md). It keeps the receiver on loopback and avoids the public 8005 forwarding path below.
+
 Endpoint: `POST /webhooks/gmail`, listening directly on **cand5:8080** with `network_mode: host`. Your existing forward is **8005 → 8080**. Compose has no `ports` mappings; containers share cand5's network namespace. The successful host-network hello-world test does not yet establish webhook or image-build readiness.
 
 The public URL must use HTTPS, for example `https://YOUR_HOST:8005/webhooks/gmail`. A plain TCP forward alone does not add TLS. Terminate HTTPS at your existing proxy or tunnel and forward HTTP to 8080. Preserve the Authorization header. The private dashboard remains separate on loopback port 8787.

@@ -1,0 +1,31 @@
+name: telegram-mail-tunnel
+services:
+  ngrok:
+    image: ngrok/ngrok@sha256:14d80d083e5b53145f416bbbd36238336c9de4016c43fd950eb2eb845670583b
+    restart: unless-stopped
+    network_mode: host
+    init: true
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    command: [start, mail-webhook, --config, /run/ngrok/config.yml]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 64m
+    memswap_limit: 96m
+    cpus: 0.15
+    pids_limit: 32
+    environment:
+      GOMEMLIMIT: 48MiB
+      GOMAXPROCS: "1"
+    volumes:
+      - type: bind
+        source: ./secrets/ngrok
+        target: /run/ngrok
+        read_only: true
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /tmp:size=4m,mode=1777
+    logging:
+      # Some vendor authentication errors echo the rejected token.
+      driver: none
