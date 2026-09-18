@@ -73,4 +73,6 @@ sudo systemctl is-enabled docker
 
 Enable Docker at boot with `sudo systemctl enable docker` if required. `unless-stopped` does not reactivate a manually stopped service. Keep the complete project `data` directory across container recreation; use the documented SQLite backup command for off-host copies.
 
+For an existing installation with working Pub/Sub and OAuth, follow [GMAIL-API.md](GMAIL-API.md) to switch the mail reader before the final latency and reboot tests. The switch preserves the original checkpoint and delivery records.
+
 Do not mark the deployment verified until these cand5 tests have actual results. Local mocked tests and Compose validation cannot establish server connectivity, memory usage, latency, or reboot recovery.

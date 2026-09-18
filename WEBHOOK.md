@@ -11,8 +11,8 @@ The public URL must use HTTPS, for example `https://YOUR_HOST:8005/webhooks/gmai
 - Google-signed OIDC token validation: signature, expiration, issuer, exact audience, and verified push service-account email.
 - Pub/Sub subscription and Gmail account checks.
 - SQLite notification persistence and duplicate handling. HTTP 204 is returned after commit; storage errors return 503 for Pub/Sub retry.
-- Notifications wake the existing IMAP collector within approximately one second while it is idle. Email bodies still come from IMAP; a Gmail app password is still required. The ten-second poll remains a fallback.
-- Optional Gmail API watch setup and daily renewal, with five-minute retries after renewal errors. This requires OAuth credentials for the same mailbox. It does not replace the IMAP reader with Gmail history synchronization.
+- Notifications wake the selected collector within approximately one second while idle. Existing installations keep their IMAP reader until explicitly switched. After verifying push delivery, follow [GMAIL-API.md](GMAIL-API.md) to read mail using OAuth without an app password.
+- Optional Gmail API watch setup and daily renewal, with five-minute retries after renewal errors. This requires OAuth credentials for the same mailbox. Watch renewal and the mail reader's history checkpoint are independent.
 
 ## 1. Google Cloud resources
 
@@ -100,7 +100,7 @@ Expected: a `gmail_webhook_received` event in the console Logs, `webhook_pending
 
 The receiver writes `gmail_webhook_accepted` (HTTP 204 after commit) or `gmail_webhook_rejected` to Docker logs. Rejections include only the HTTP status, a fixed error code, and an `authenticated` flag. No tokens, headers, notification payloads, or email addresses are logged. For example, `invalid_subscription` or `unexpected_mailbox` identifies a configuration mismatch; `invalid_pubsub_data` or `invalid_history_id` identifies a malformed notification. `unsupported_transfer_encoding` identifies an unsupported request framing. The flag becomes true only after the Google token passes verification; false can also mean a request was rejected before verification.
 
-History IDs supplied as JSON integers or decimal strings are stored exactly as text. Boolean, floating-point, and malformed IDs are rejected. This does not change the IMAP checkpoint or weaken token, subscription, or mailbox validation.
+History IDs supplied as JSON integers or decimal strings are stored exactly as text. Boolean, floating-point, and malformed IDs are rejected. Receiving a notification does not advance either reader's checkpoint or weaken token, subscription, or mailbox validation.
 
 For repeated failures, inspect `pubsub.googleapis.com/subscription/push_request_count` in Cloud Monitoring, grouped by `response_code` and `response_class`, then compare the receiver logs. The default subscription dashboard might not include this chart. A backlog or a Telegram delivery alone does not prove that a push notification was accepted. Pub/Sub retries rejected notifications; do not purge the subscription while diagnosing.
 

@@ -237,6 +237,7 @@ class WebhookTests(unittest.TestCase):
                                     'client_secret':'test-secret','refresh_token':'test-refresh'})
         with self.db:
             a.put(self.db,'cursor',456)
+            a.put(self.db,'gmail_history_cursor',789)
         class Response:
             def __init__(self,value): self.value=value
             def __enter__(self): return self
@@ -248,6 +249,7 @@ class WebhookTests(unittest.TestCase):
         with patch.object(w.urllib.request,'build_opener',return_value=opener),patch.object(a,'post',return_value={'expiration':str(expiry),'historyId':'1000'}) as post:
             w.renew_watch()
         self.assertEqual(a.meta(self.db,'cursor'),'456')
+        self.assertEqual(a.meta(self.db,'gmail_history_cursor'),'789')
         self.assertEqual(float(a.meta(self.db,'gmail_watch_expiration')),expiry/1000)
         self.assertLess(float(a.meta(self.db,'gmail_watch_renew_at')),time.time()+86401)
         self.assertEqual(post.call_args.args[1]['labelIds'],['INBOX'])

@@ -8,7 +8,7 @@ GitHub builds and publishes images; the server pulls a selected release and upda
 
 For a fixed HTTPS Pub/Sub endpoint through ngrok, see [NGROK.md](NGROK.md).
 
-**Target:** cand5, an LXC container nested in KVM. Default Docker networking fails with a sysctl permission error. The user has verified `docker run --rm --network host hello-world` only. Image building, application startup, container access to Gmail/model/Telegram, delivery within 60 seconds, and server reboot recovery remain unverified on cand5.
+**Target:** cand5, an LXC container nested in KVM. Default Docker networking fails with a sysctl permission error, so all services use host networking. The existing IMAP/model/Telegram pipeline has delivered test messages in 9.41 and 7.8 seconds, and authenticated Pub/Sub requests have returned HTTP 204 through ngrok. The new Gmail API reader, sustained latency, resource usage, off-host restore, and cand5 reboot recovery still require live validation. Application images are built in GitHub Actions and pulled by cand5.
 
 All Compose services use `network_mode: host` and share cand5's network namespace, not the outer KVM host's network. There are no `ports` mappings. Build steps also request host networking. The dashboard binds directly to `127.0.0.1:8787`; the webhook binds to `${WEBHOOK_BIND:-0.0.0.0}:8080`. SQLite persists in `./data`; credentials remain read-only at `/run/agent-secrets`. See [CAND5.md](CAND5.md) for staged host checks.
 
@@ -123,7 +123,7 @@ sudo docker stats --no-stream
 
 Expected for each: `state=sent`, a `telegram_id`, and `gmail_to_telegram_seconds <= 60`. Match the email ID with the Telegram message. Timing starts at Gmail INTERNALDATE and ends at Telegram API acknowledgement, not phone notification display.
 
-The agent polls every 10 seconds and uses one worker. Bursts, slow APIs, throttling, outages, and retries can exceed the 60-second target. The tool loop allows four turns with a 32-second scheduling budget and per-request socket timeouts up to 12 seconds; this is not a strict wall-clock SLA.
+Existing installations use a ten-second IMAP poll and one worker. After configuring Gmail OAuth and verifying Pub/Sub, [switch to the Gmail API reader](GMAIL-API.md) to remove the app-password dependency. API mode uses push wakeups and a sixty-second history reconciliation fallback. Bursts, slow APIs, throttling, outages, and retries can exceed the 60-second target. The tool loop allows four turns with a 32-second scheduling budget and per-request socket timeouts up to 12 seconds; this is not a strict wall-clock SLA.
 
 Disconnect SSH, send another email, and verify delivery.
 
@@ -171,7 +171,7 @@ Expected: `BACKUP_OK`. Copy it to another trusted machine with `scp`. It contain
 
 For migration, stop the old agent before the final snapshot and keep it stopped. Older snapshots may replay messages sent after the snapshot.
 
-On the new host, before other setup or status commands:
+For an IMAP installation, on the new host before other setup or status commands (API-mode backups instead use the OAuth recovery procedure in [GMAIL-API.md](GMAIL-API.md)):
 
 ```sh
 sh prepare.sh

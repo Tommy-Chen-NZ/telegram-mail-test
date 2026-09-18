@@ -68,6 +68,7 @@ def connect():
       message_id TEXT PRIMARY KEY, history_id TEXT NOT NULL,
       received REAL NOT NULL, processed REAL);
     CREATE INDEX IF NOT EXISTS webhook_pending ON webhook_events(processed);
+    CREATE TABLE IF NOT EXISTS gmail_fetch(id TEXT PRIMARY KEY);
     ''')
     # Serialize schema migration across the dashboard and worker processes.
     with db:
@@ -414,34 +415,46 @@ def work_one(db, summarize=agent_summary, send=telegram):
 def collect():
     db = connect()
     client = None
+    api_mode = meta(db, 'gmail_source', 'imap') == 'gmail_api'
+    api = gmail_api_client() if api_mode else None
     while not STOP.is_set():
         successful = False
+        complete = True
+        retry_delay = 10
         try:
-            if client is None:
+            if not api_mode and client is None:
                 client = mail_connection()
                 initialize_mail(db, client)
             # Only acknowledge notifications already visible before this poll.
             # Notifications arriving during the poll stay pending for another pass.
             pending_ids = [r[0] for r in db.execute(
                 'SELECT message_id FROM webhook_events WHERE processed IS NULL LIMIT 1000')]
-            poll(db, client)
+            if api_mode:
+                require_verified(db, 'gmail')
+                complete = api.poll(db)
+            else:
+                poll(db, client)
             with db:
                 put(db, 'collector_ok', time.time())
-                db.executemany('UPDATE webhook_events SET processed=? WHERE message_id=?',
-                               [(time.time(), message_id) for message_id in pending_ids])
+                if complete:
+                    db.executemany('UPDATE webhook_events SET processed=? WHERE message_id=?',
+                                   [(time.time(), message_id) for message_id in pending_ids])
             successful = True
-        except Exception:
-            log('collector_retry')
+        except Exception as exc:
+            code = (exc.code if isinstance(exc, Failure) else 'gmail_api_sync_failed') if api_mode else 'imap_connection_or_poll_failed'
+            retry_delay = max(10, min(3600, getattr(exc, 'retry_after', 0)))
+            log('collector_retry', code=code)
             with contextlib.suppress(Exception):
                 with db:
-                    event(db, None, 'collector_retry', 'imap_connection_or_poll_failed')
+                    event(db, None, 'collector_retry', code)
             if client:
                 with contextlib.suppress(Exception):
                     client.logout()
             client = None
-        # Cross-process wakeups survive crashes through SQLite. On failure retain
-        # the existing ten-second backoff instead of spinning on pending events.
-        for _ in range(10):
+        # Push is primary in API mode; reconcile every minute as a fallback.
+        # Incomplete pages/fetches continue promptly, even without a webhook.
+        interval = (1 if not complete else (60 if api_mode else 10)) if successful else retry_delay
+        for _ in range(interval):
             if STOP.wait(1):
                 break
             if successful and db.execute('SELECT 1 FROM webhook_events WHERE processed IS NULL LIMIT 1').fetchone():
@@ -495,12 +508,27 @@ def run():
         db.close()
 
 
-def fingerprint(name):
+def gmail_api_client():
+    from gmail_api import GmailAPI
+    return GmailAPI(sys.modules[__name__])
+
+
+def gmail_api_fingerprint():
+    return credential_digest({'email': secret('gmail')['email'].strip().lower(), 'oauth': secret('gmail_oauth')})
+
+
+def fingerprint(name, db=None):
+    if name == 'gmail':
+        if db is None:
+            with contextlib.closing(connect()) as connection:
+                return fingerprint(name, connection)
+        if meta(db, 'gmail_source', 'imap') == 'gmail_api':
+            return gmail_api_fingerprint()
     return credential_digest(model_config() if name == 'model' else secret(name))
 
 
 def require_verified(db, name):
-    if meta(db, name + '_verified') != fingerprint(name):
+    if meta(db, name + '_verified') != fingerprint(name, db):
         raise Failure('verify_' + name + '_first')
 
 
@@ -510,6 +538,8 @@ def setup(name):
         value = {'token': hidden('Telegram bot token (hidden): '), 'chat_id': '7558581320'}
     elif name == 'gmail':
         require_verified(db, 'telegram')
+        if meta(db, 'gmail_source', 'imap') == 'gmail_api':
+            raise Failure('use_setup_watch_then_verify_gmail_for_oauth')
         value = {'email': hidden('Gmail address (hidden): ').lower(),
                  'app_password': hidden('Gmail app password, not your login password (hidden): ').replace(' ', '')}
         if meta(db, 'account') not in (None, value['email']):
@@ -538,12 +568,16 @@ def verify(name):
         print('TELEGRAM_SEND_OK message_id=' + str(result['message_id']))
     elif name == 'gmail':
         require_verified(db, 'telegram')
-        client = mail_connection()
-        try:
-            initialize_mail(db, client)
-        finally:
-            client.logout()
-        print('GMAIL_OK: INBOX checkpoint saved; only new arrivals from now')
+        if meta(db, 'gmail_source', 'imap') == 'gmail_api':
+            gmail_api_client().verify(db)
+            print('GMAIL_API_OK: OAuth mailbox and read access verified; checkpoint preserved')
+        else:
+            client = mail_connection()
+            try:
+                initialize_mail(db, client)
+            finally:
+                client.logout()
+            print('GMAIL_OK: INBOX checkpoint saved; only new arrivals from now')
     else:
         require_verified(db, 'gmail')
         trace = []
@@ -555,13 +589,35 @@ def verify(name):
         print('MODEL_TOOL_LOOP_OK: ' + ' -> '.join(trace))
         print(summary)
     with db:
-        put(db, name + '_verified', fingerprint(name))
+        put(db, name + '_verified', fingerprint(name, db))
+
+
+def enable_gmail_api():
+    # Stop the worker before switching. Webhook reception can stay online.
+    with exclusive(), contextlib.closing(connect()) as db:
+        require_verified(db, 'telegram')
+        digest = gmail_api_fingerprint()
+        gmail_api_client().verify(db)
+        account = secret('gmail')['email'].strip().lower()
+        if digest != gmail_api_fingerprint():
+            raise Failure('configuration_changed_retry')
+        with db:
+            put(db, 'account', account)
+            if meta(db, 'start') is None:
+                put(db, 'start', int(time.time()))
+            put(db, 'gmail_source', 'gmail_api')
+            put(db, 'gmail_verified', digest)
+            event(db, None, 'gmail_api_enabled')
+        print('GMAIL_API_ENABLED: OAuth reader selected; existing progress preserved')
 
 
 def status():
     db = connect()
     now = time.time()
     result = {'counts': dict(db.execute('SELECT state,count(*) FROM jobs GROUP BY state').fetchall()),
+              'gmail_source': meta(db, 'gmail_source', 'imap'),
+              'gmail_history_cursor': meta(db, 'gmail_history_cursor'),
+              'gmail_fetch_pending': db.execute('SELECT count(*) FROM gmail_fetch').fetchone()[0],
               'webhook_pending': db.execute('SELECT count(*) FROM webhook_events WHERE processed IS NULL').fetchone()[0],
               'gmail_watch_expiration': meta(db, 'gmail_watch_expiration'),
               'collector_age_seconds': round(now - float(meta(db, 'collector_ok', '0')), 1),
@@ -619,7 +675,7 @@ def restore(source):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('command', choices=['setup-telegram','verify-telegram','setup-gmail','verify-gmail',
-                        'setup-model','verify-model','run','status','health','backup','restore'])
+                        'setup-model','verify-model','enable-gmail-api','run','status','health','backup','restore'])
     parser.add_argument('destination', nargs='?')
     args = parser.parse_args()
     os.umask(0o077)
@@ -627,6 +683,8 @@ def main():
         setup(args.command[6:])
     elif args.command.startswith('verify-'):
         verify(args.command[7:])
+    elif args.command == 'enable-gmail-api':
+        enable_gmail_api()
     elif args.command == 'run':
         run()
     elif args.command == 'status':

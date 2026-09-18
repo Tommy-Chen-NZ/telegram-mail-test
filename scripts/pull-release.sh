@@ -58,6 +58,6 @@ for file in mailagent.py dashboard.py demo_dashboard.py webhook.py requirements.
 done
 cp "$release/scripts/deploy-server.sh" "$root/scripts/deploy-server.sh"
 cp "$release/scripts/pull-release.sh" "$root/scripts/pull-release.sh"
-for helper in compose.ngrok.yaml ngrok_setup.py; do
+for helper in compose.ngrok.yaml ngrok_setup.py gmail_api.py; do
   if [[ -f "$release/$helper" ]]; then cp "$release/$helper" "$root/$helper"; fi
 done
