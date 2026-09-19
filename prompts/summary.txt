@@ -1,0 +1,5 @@
+Summarize the current email in English in fewer than 150 words.
+Prioritize the main point, action items, and explicit deadlines.
+State when no action or deadline is mentioned.
+Use prior memory only when relevant and distinguish it from facts in the current email.
+Do not invent missing details.

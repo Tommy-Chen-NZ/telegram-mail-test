@@ -702,6 +702,27 @@ def memory_command(clear=False):
                               'updated_at': meta(db, 'memory_updated_at')}, ensure_ascii=False, indent=2))
 
 
+def set_prompt(source):
+    try:
+        with Path(source).open('rb') as stream:
+            raw = stream.read(8193)
+        if len(raw) > 8192:
+            raise Failure('prompt_too_large')
+        prompt = raw.decode('utf-8-sig').strip()
+    except (OSError, UnicodeError):
+        raise Failure('prompt_file_unreadable') from None
+    if not prompt or '\x00' in prompt:
+        raise Failure('invalid_prompt')
+    with exclusive(), contextlib.closing(connect()) as db:
+        cfg = model_config()
+        settings = {'credential_digest': credential_digest(secret('model')),
+                    'model': cfg['model'], 'endpoint': cfg['endpoint'], 'prompt': prompt}
+        with db:
+            put(db, 'model_active', json.dumps(settings))
+            event(db, None, 'prompt_updated')
+    print('PROMPT_SAVED: run verify-model before starting the agent')
+
+
 def backup(destination):
     target = Path(destination)
     if target.exists():
@@ -747,7 +768,7 @@ def restore(source):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('command', choices=['setup-telegram','verify-telegram','setup-gmail','verify-gmail',
-                        'setup-model','verify-model','enable-gmail-api','run','status','memory','clear-memory','health','backup','restore'])
+                        'setup-model','verify-model','set-prompt','enable-gmail-api','run','status','memory','clear-memory','health','backup','restore'])
     parser.add_argument('destination', nargs='?')
     args = parser.parse_args()
     os.umask(0o077)
@@ -763,6 +784,10 @@ def main():
         status()
     elif args.command in ('memory', 'clear-memory'):
         memory_command(clear=args.command == 'clear-memory')
+    elif args.command == 'set-prompt':
+        if not args.destination:
+            raise Failure('prompt_path_required')
+        set_prompt(args.destination)
     elif args.command == 'health':
         db = connect()
         if any(time.time() - float(meta(db, key, '0')) > 120 for key in ('collector_ok', 'worker_ok')):
