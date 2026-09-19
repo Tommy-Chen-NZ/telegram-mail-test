@@ -8,6 +8,8 @@ GitHub builds and publishes images; the server pulls a selected release and upda
 
 For a fixed HTTPS Pub/Sub endpoint through ngrok, see [NGROK.md](NGROK.md).
 
+Compact cross-email memory is updated by the model in the existing tool loop and persisted in SQLite. See [MEMORY.md](MEMORY.md) for its approximate 500-token budget, inspection, clearing and acceptance tests.
+
 **Target:** cand5, an LXC container nested in KVM. Default Docker networking fails with a sysctl permission error, so all services use host networking. The existing IMAP/model/Telegram pipeline has delivered test messages in 9.41 and 7.8 seconds, and authenticated Pub/Sub requests have returned HTTP 204 through ngrok. The Gmail API reader recorded a 24.14-second test delivery, and the user confirmed receipt of a separate Telegram delivery check. Sustained latency, resource usage, off-host restore, and cand5 reboot recovery still require live validation. Application images are built in GitHub Actions and pulled by cand5.
 
 All Compose services use `network_mode: host` and share cand5's network namespace, not the outer KVM host's network. There are no `ports` mappings. Build steps also request host networking. The webhook binds to `${WEBHOOK_BIND:-0.0.0.0}:8080`. SQLite persists in `./data`; credentials remain read-only at `/run/agent-secrets`. See [CAND5.md](CAND5.md) for staged host checks.
