@@ -9,6 +9,7 @@ import urllib.error
 import urllib.request
 
 import mailagent as a
+import env_config
 
 
 def private_write(path, content):
@@ -45,18 +46,41 @@ def configure(root, domain, token, project):
                'subscription': 'projects/' + project + '/subscriptions/gmail-push'}
     secret_dir = root / 'secrets'
     existing = secret_dir / 'webhook.json'
-    if existing.exists() and json.loads(existing.read_text()) != webhook:
+    values = env_config.read(root / '.env')
+    unified = values.get('ENV_CONFIG_VERSION') == '1'
+    current = env_config.credential(values, 'webhook') if unified else (json.loads(existing.read_text()) if existing.exists() else None)
+    if current is not None and current != webhook:
         raise a.Failure('existing_webhook_configuration_conflict')
     tunnel_dir = secret_dir / 'ngrok'
     tunnel_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(secret_dir, 0o700)
     os.chmod(tunnel_dir, 0o700)
     private_write(tunnel_dir / 'config.yml', json.dumps(cfg, indent=2) + '\n')
-    private_write(existing, json.dumps(webhook) + '\n')
-    env = root / '.env'
-    lines = [line for line in env.read_text().splitlines() if not line.startswith('WEBHOOK_BIND=')]
-    private_write(env, '\n'.join(lines + ['WEBHOOK_BIND=127.0.0.1']) + '\n')
+    if unified:
+        env_config.update(root / '.env', {'NGROK_DOMAIN': cfg['endpoints'][0]['url'].removeprefix('https://'),
+                                        'NGROK_AUTHTOKEN': token, 'WEBHOOK_BIND': '127.0.0.1'})
+    else:
+        private_write(existing, json.dumps(webhook) + '\n')
+        # Keep the established unquoted infrastructure setting for old installations.
+        env = root / '.env'
+        lines = [line for line in env.read_text().splitlines() if not line.startswith('WEBHOOK_BIND=')]
+        private_write(env, '\n'.join(lines + ['WEBHOOK_BIND=127.0.0.1']) + '\n')
     return webhook['audience']
+
+
+def render(root):
+    values = env_config.read(root / '.env')
+    if values.get('ENV_CONFIG_VERSION') != '1':
+        raise a.Failure('migrate_env_first')
+    cfg = config(values.get('NGROK_DOMAIN', ''), values.get('NGROK_AUTHTOKEN', ''))
+    if env_config.credential(values, 'webhook')['audience'] != cfg['endpoints'][0]['url'] + '/webhooks/gmail':
+        raise a.Failure('ngrok_webhook_url_mismatch')
+    directory = root / 'secrets/ngrok'
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(root / 'secrets', 0o700)
+    os.chmod(directory, 0o700)
+    private_write(directory / 'config.yml', json.dumps(cfg, indent=2) + '\n')
+    print('NGROK_CONFIG_RENDERED: private configuration generated from .env')
 
 
 def request_result(url, data=None):
@@ -89,7 +113,7 @@ def verify(root):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=('setup', 'verify'))
+    parser.add_argument('command', choices=('setup', 'render', 'verify'))
     args = parser.parse_args()
     root = Path.cwd()
     os.umask(0o077)
@@ -99,6 +123,8 @@ def main():
         token = a.hidden('ngrok authtoken (hidden): ')
         url = configure(root, domain, token, project)
         print('NGROK_CONFIG_OK: ' + url)
+    elif args.command == 'render':
+        render(root)
     else:
         verify(root)
 

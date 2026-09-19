@@ -90,18 +90,18 @@ def renew_watch():
 def maintain_watch():
     while not STOP.is_set():
         # An externally managed watch is also supported; OAuth setup is optional.
-        if (a.SECRETS / 'gmail_oauth.json').is_file():
-            try:
+        try:
+            if a.has_secret('gmail_oauth'):
                 with contextlib.closing(a.connect()) as db:
                     due = float(a.meta(db, 'gmail_watch_renew_at', 0))
                 if time.time() >= due:
                     renew_watch()
-            except Exception:
-                with contextlib.suppress(Exception):
-                    with contextlib.closing(a.connect()) as db:
-                        with db:
-                            a.event(db, None, 'gmail_watch_retry', 'watch_renewal_failed')
-                a.log('gmail_watch_retry', code='watch_renewal_failed')
+        except Exception:
+            with contextlib.suppress(Exception):
+                with contextlib.closing(a.connect()) as db:
+                    with db:
+                        a.event(db, None, 'gmail_watch_retry', 'watch_renewal_failed')
+            a.log('gmail_watch_retry', code='watch_renewal_failed')
         STOP.wait(300)
 
 

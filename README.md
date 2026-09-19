@@ -12,6 +12,10 @@ Compact cross-email memory is updated by the model in the existing tool loop and
 
 For GitHub-based recovery, see [RECOVERY.md](RECOVERY.md). Edit and pull `prompts/summary.txt`, then import it with `set-prompt` as described in [PROMPTS.md](PROMPTS.md).
 
+For simpler local configuration, set `SUMMARY_PROMPT` in `.env`, verify through Compose, and recreate the agent. See [PROMPTS.md](PROMPTS.md) for precedence and examples.
+
+All application credentials can also live in that private `.env`, mounted read-only rather than injected into container environment variables. See [CONFIGURATION.md](CONFIGURATION.md) for safe migration and `.env` + SQLite recovery.
+
 **Target:** cand5, an LXC container nested in KVM. Default Docker networking fails with a sysctl permission error, so all services use host networking. The existing IMAP/model/Telegram pipeline has delivered test messages in 9.41 and 7.8 seconds, and authenticated Pub/Sub requests have returned HTTP 204 through ngrok. The Gmail API reader recorded a 24.14-second test delivery, and the user confirmed receipt of a separate Telegram delivery check. Sustained latency, resource usage, off-host restore, and cand5 reboot recovery still require live validation. Application images are built in GitHub Actions and pulled by cand5.
 
 All Compose services use `network_mode: host` and share cand5's network namespace, not the outer KVM host's network. There are no `ports` mappings. Build steps also request host networking. The webhook binds to `${WEBHOOK_BIND:-0.0.0.0}:8080`. SQLite persists in `./data`; credentials remain read-only at `/run/agent-secrets`. See [CAND5.md](CAND5.md) for staged host checks.
@@ -22,7 +26,7 @@ Upload from your computer:
 
 ```sh
 ssh USER@HOST "mkdir -p ~/telegram-mail-test"
-scp -r Dockerfile compose.yaml requirements.txt mailagent.py gmail_api.py webhook.py prepare.sh README.md WEBHOOK.md CAND5.md tests USER@HOST:~/telegram-mail-test/
+scp -r Dockerfile compose.yaml requirements.txt mailagent.py gmail_api.py webhook.py env_config.py prepare.sh README.md WEBHOOK.md CAND5.md tests USER@HOST:~/telegram-mail-test/
 ssh USER@HOST
 ```
 

@@ -61,3 +61,4 @@ cp "$release/scripts/pull-release.sh" "$root/scripts/pull-release.sh"
 for helper in compose.ngrok.yaml ngrok_setup.py gmail_api.py; do
   if [[ -f "$release/$helper" ]]; then cp "$release/$helper" "$root/$helper"; fi
 done
+if [[ -f "$release/env_config.py" ]]; then cp "$release/env_config.py" "$root/env_config.py"; fi

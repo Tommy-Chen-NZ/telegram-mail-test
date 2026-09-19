@@ -46,7 +46,10 @@ jobs:
           cmp compose.ngrok.yaml "$RUNNER_TEMP/deployment/compose.ngrok.yaml"
           test -f "$RUNNER_TEMP/deployment/ngrok_setup.py"
           cmp gmail_api.py "$RUNNER_TEMP/deployment/gmail_api.py"
+          cmp env_config.py "$RUNNER_TEMP/deployment/env_config.py"
           docker run --rm --network host --entrypoint python mail-summary-agent:ci -c 'import mailagent; assert mailagent.gmail_api_client().__class__.__name__ == "GmailAPI"'
+          printf '%s\n' "ENV_CONFIG_VERSION='1'" "TELEGRAM_BOT_TOKEN='test-only-canary'" "TELEGRAM_CHAT_ID='1'" > "$RUNNER_TEMP/test.env"
+          docker run --rm --network host --read-only --entrypoint python -e AGENT_ENV_FILE=/run/agent-config.env -v "$RUNNER_TEMP/test.env:/run/agent-config.env:ro" mail-summary-agent:ci -c 'import mailagent, os; assert mailagent.secret("telegram")["token"] == "test-only-canary"; assert "TELEGRAM_BOT_TOKEN" not in os.environ'
           docker run --rm --network host --entrypoint python mail-summary-agent:ci -c 'from pathlib import Path; assert not Path("/app/dashboard.py").exists(); assert not Path("/app/frontend").exists()'
           test -f "$RUNNER_TEMP/deployment/dashboard.py"
           test -f "$RUNNER_TEMP/deployment/demo_dashboard.py"

@@ -23,6 +23,7 @@ import urllib.parse
 import urllib.request
 from email.parser import BytesParser
 from html.parser import HTMLParser
+import env_config
 
 DATA = Path(os.getenv('AGENT_DATA', 'data'))
 SECRETS = Path(os.getenv('AGENT_SECRETS', 'secrets'))
@@ -105,7 +106,34 @@ def event(db, job, kind, code=None, attempt=None):
                (job, time.time(), kind, code, attempt))
 
 
+def env_path():
+    return Path(os.getenv('AGENT_ENV_FILE', str(SECRETS.parent / '.env')))
+
+
+def env_settings():
+    try:
+        values = env_config.read(env_path())
+        if values.get('ENV_CONFIG_VERSION') not in (None, '1'):
+            raise Failure('unsupported_env_config_version')
+        return values
+    except env_config.ConfigError as exc:
+        raise Failure(str(exc)) from None
+
+
+def has_secret(name):
+    values = env_settings()
+    if values.get('ENV_CONFIG_VERSION') == '1':
+        return any(key in values for key in env_config.FIELDS[name].values())
+    return (SECRETS / (name + '.json')).is_file()
+
+
 def secret(name):
+    values = env_settings()
+    if values.get('ENV_CONFIG_VERSION') == '1':
+        try:
+            return env_config.credential(values, name)
+        except env_config.ConfigError as exc:
+            raise Failure(str(exc)) from None
     try:
         return json.loads((SECRETS / (name + '.json')).read_text('utf-8'))
     except (OSError, ValueError):
@@ -113,6 +141,12 @@ def secret(name):
 
 
 def save_secret(name, value):
+    if env_settings().get('ENV_CONFIG_VERSION') == '1':
+        try:
+            env_config.update(env_path(), {env_config.FIELDS[name][key]: str(item) for key, item in value.items()})
+        except (env_config.ConfigError, KeyError):
+            raise Failure('env_config_write_failed') from None
+        return
     SECRETS.mkdir(parents=True, exist_ok=True, mode=0o700)
     path = SECRETS / (name + '.json')
     temp = path.with_suffix('.tmp')
@@ -327,6 +361,9 @@ def model_config():
         active = json.loads(meta(db, 'model_active', '{}'))
     if active.get('credential_digest') == credential_digest(cfg):
         cfg = {**cfg, **{k: active[k] for k in ('model', 'endpoint', 'prompt')}}
+    override = env_settings().get('SUMMARY_PROMPT', os.getenv('SUMMARY_PROMPT', ''))
+    if override.strip():
+        return {**cfg, 'prompt': validate_prompt(override)}
     return {**cfg, 'prompt': cfg.get('prompt', DEFAULT_PROMPT)}
 
 
@@ -702,17 +739,27 @@ def memory_command(clear=False):
                               'updated_at': meta(db, 'memory_updated_at')}, ensure_ascii=False, indent=2))
 
 
+def validate_prompt(value):
+    try:
+        size = len(value.encode('utf-8'))
+    except UnicodeError:
+        raise Failure('invalid_prompt') from None
+    if size > 8192:
+        raise Failure('prompt_too_large')
+    if not value.strip() or '\x00' in value:
+        raise Failure('invalid_prompt')
+    return value.strip()
+
+
 def set_prompt(source):
     try:
         with Path(source).open('rb') as stream:
             raw = stream.read(8193)
         if len(raw) > 8192:
             raise Failure('prompt_too_large')
-        prompt = raw.decode('utf-8-sig').strip()
+        prompt = validate_prompt(raw.decode('utf-8-sig'))
     except (OSError, UnicodeError):
         raise Failure('prompt_file_unreadable') from None
-    if not prompt or '\x00' in prompt:
-        raise Failure('invalid_prompt')
     with exclusive(), contextlib.closing(connect()) as db:
         cfg = model_config()
         settings = {'credential_digest': credential_digest(secret('model')),
@@ -721,6 +768,15 @@ def set_prompt(source):
             put(db, 'model_active', json.dumps(settings))
             event(db, None, 'prompt_updated')
     print('PROMPT_SAVED: run verify-model before starting the agent')
+
+
+def migrate_env():
+    with exclusive():
+        try:
+            env_config.migrate(env_path(), SECRETS, model_config())
+        except env_config.ConfigError as exc:
+            raise Failure(str(exc)) from None
+    print('ENV_MIGRATED: credentials saved privately; legacy files retained; reverify and recreate containers')
 
 
 def backup(destination):
@@ -768,7 +824,7 @@ def restore(source):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('command', choices=['setup-telegram','verify-telegram','setup-gmail','verify-gmail',
-                        'setup-model','verify-model','set-prompt','enable-gmail-api','run','status','memory','clear-memory','health','backup','restore'])
+                        'setup-model','verify-model','set-prompt','migrate-env','enable-gmail-api','run','status','memory','clear-memory','health','backup','restore'])
     parser.add_argument('destination', nargs='?')
     args = parser.parse_args()
     os.umask(0o077)
@@ -788,6 +844,8 @@ def main():
         if not args.destination:
             raise Failure('prompt_path_required')
         set_prompt(args.destination)
+    elif args.command == 'migrate-env':
+        migrate_env()
     elif args.command == 'health':
         db = connect()
         if any(time.time() - float(meta(db, key, '0')) > 120 for key in ('collector_ok', 'worker_ok')):

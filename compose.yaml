@@ -21,9 +21,16 @@ services:
     environment:
       AGENT_DATA: /data
       AGENT_SECRETS: /run/agent-secrets
+      AGENT_ENV_FILE: /run/agent-config.env
     volumes:
       - ./data:/data
       - ./secrets:/run/agent-secrets:ro
+      - type: bind
+        source: ./.env
+        target: /run/agent-config.env
+        read_only: true
+        bind:
+          create_host_path: false
     tmpfs:
       - /tmp:size=4m,mode=1777
     healthcheck:
@@ -56,9 +63,16 @@ services:
     environment:
       AGENT_DATA: /data
       AGENT_SECRETS: /run/agent-secrets
+      AGENT_ENV_FILE: /run/agent-config.env
     volumes:
       - ./data:/data
       - ./secrets:/run/agent-secrets:ro
+      - type: bind
+        source: ./.env
+        target: /run/agent-config.env
+        read_only: true
+        bind:
+          create_host_path: false
     tmpfs:
       - /tmp:size=8m,mode=1777
     healthcheck:

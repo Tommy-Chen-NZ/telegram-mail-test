@@ -23,7 +23,7 @@ class PullTests(unittest.TestCase):
         self.bundle = self.root / 'bundle'
         (self.bundle / 'scripts').mkdir(parents=True)
         for name in ('compose.yaml', 'prepare.sh', 'mailagent.py',
-                     'webhook.py', 'gmail_api.py', 'requirements.txt'):
+                     'webhook.py', 'gmail_api.py', 'env_config.py', 'requirements.txt'):
             shutil.copy(SOURCE / name, self.bundle / name)
         shutil.copy(SOURCE / 'scripts/pull-release.sh', self.bundle / 'scripts')
         (self.bundle / 'scripts/deploy-server.sh').write_text(
@@ -78,6 +78,7 @@ elif args[:1] == ['cp']:
                          [str(self.root), SHA, DIGEST, 'false', 'telegram-mail-test'])
         self.assertEqual((self.root / 'secrets/token').read_text(), 'KEEP')
         self.assertEqual((self.root / 'gmail_api.py').read_text(), (SOURCE / 'gmail_api.py').read_text())
+        self.assertEqual((self.root / 'env_config.py').read_text(), (SOURCE / 'env_config.py').read_text())
 
     def test_revision_mismatch_stops_before_preparation(self):
         result = self.run_pull('prepare', revision='d'*40)

@@ -4,7 +4,9 @@ This is a recovery procedure for a lost server, not just a container restart. A 
 
 ## Off-host prerequisites
 
-Keep a consistent SQLite snapshot, the complete `secrets/` directory (including `ngrok/`), `.env`, and the deployed image digest and matching full Git commit outside cand5. Store credentials and mail data in protected, preferably encrypted backup storage. Never commit them to GitHub. A backup kept only on cand5 cannot recover a lost box.
+After [unified configuration migration](CONFIGURATION.md), keep a consistent SQLite snapshot, the private `.env`, and the deployed image digest and matching full Git commit outside cand5. For an installation that has not migrated, also retain the complete `secrets/` directory. Store credentials and mail data in protected, preferably encrypted backup storage. Never commit them to GitHub. A backup kept only on cand5 cannot recover a lost box.
+
+If configured, `.env` contains the active `SUMMARY_PROMPT` override; it is not part of the SQLite snapshot. Restore it before verifying the model through Compose.
 
 Create a live SQLite snapshot with the application's backup API rather than copying an active database/WAL file:
 
@@ -38,11 +40,13 @@ cd ~/telegram-mail-test
 
 ## 3. Restore state and credentials before starting services
 
-Securely restore the saved `.env` and complete `secrets/` directory into `~/telegram-mail-test`. Keep the snapshot outside `data/`; replace its example path below. Do not run setup, status or verification commands that create an empty database before restoring it.
+Securely restore the saved unified `.env` into `~/telegram-mail-test`. Keep the snapshot outside `data/`; replace its example path below. Do not run setup, status or verification commands that create an empty database before restoring it.
 
 ```sh
 sh prepare.sh
 python3 mailagent.py restore /secure-restore/agent.sqlite3
+chmod 600 .env
+python3 ngrok_setup.py render
 find secrets -type d -exec chmod 700 {} +
 find secrets -type f -exec chmod 600 {} +
 sudo docker compose --profile webhook pull agent webhook
@@ -88,6 +92,6 @@ sudo docker stats --no-stream
 
 1. Prepare Ubuntu 24.04 with Docker Compose, enable Docker at boot, and ensure the old server is stopped.
 2. Clone the private GitHub repository at the recorded release commit and pull its matching pinned GHCR image.
-3. Restore the off-host SQLite snapshot, credentials and environment configuration; correct ownership and permissions.
+3. Restore the off-host SQLite snapshot and private .env, regenerate ngrok configuration, and correct ownership and permissions.
 4. Verify Telegram, Gmail and model access; start the webhook and ngrok, renew Gmail watch, then start the agent.
 5. Send a test email, confirm its Telegram summary and latency, and reboot to verify unattended recovery.

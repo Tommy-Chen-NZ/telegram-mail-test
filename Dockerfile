@@ -3,8 +3,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
-COPY mailagent.py gmail_api.py webhook.py /app/
-COPY compose.yaml prepare.sh mailagent.py gmail_api.py webhook.py requirements.txt /opt/deployment/
+COPY mailagent.py gmail_api.py webhook.py env_config.py /app/
+COPY compose.yaml prepare.sh mailagent.py gmail_api.py webhook.py env_config.py requirements.txt /opt/deployment/
 COPY scripts/deploy-server.sh scripts/pull-release.sh /opt/deployment/scripts/
 COPY compose.ngrok.yaml ngrok_setup.py /opt/deployment/
 # Older pull scripts copy these names. Bundle inert notices, not a UI server.

@@ -8,6 +8,8 @@ __pycache__/
 node_modules/
 .preview/
 .env.*
+!.env.example
+.env-*.tmp
 .deploy.lock
 .pull.lock
 releases/

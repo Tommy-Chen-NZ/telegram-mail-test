@@ -89,7 +89,7 @@ os.chmod(temporary, 0o600)
 os.replace(temporary, path)
 PY
 cp "$release/compose.yaml" "$root/compose.yaml"
-for helper in compose.ngrok.yaml ngrok_setup.py gmail_api.py; do
+for helper in compose.ngrok.yaml ngrok_setup.py gmail_api.py env_config.py; do
   if [[ -f "$release/$helper" ]]; then cp "$release/$helper" "$root/$helper"; fi
 done
 printf '%s\n' "$image" > "$root/deployed-image.txt"

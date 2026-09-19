@@ -1,37 +1,50 @@
-# Change the summary prompt through GitHub
+# Configure the summary prompt
 
-Edit `prompts/summary.txt` in GitHub and commit it to `main`. Keep instructions in English and the UTF-8 file at most 8192 bytes. Do not include credentials or private email content. The file is version-controlled; the prompt is applied only when explicitly imported on the server.
+Edit the existing `SUMMARY_PROMPT` entry in the server's `.env`. Preserve all credentials and deployment settings:
 
-For the first use, clone a separate source checkout. The existing runtime directory may have been installed from an image bundle and is not necessarily a Git repository:
+```dotenv
+SUMMARY_PROMPT='Summarize the current email in English in fewer than 100 words. Include the main point, action items and explicit deadlines. Use prior memory only when relevant.'
+```
+
+Use one physical line, single quotes and at most 8192 UTF-8 bytes. Dollar signs and hash characters remain literal. Escape an apostrophe inside the value as `\'`. The literal file reader does not expand shell commands or `${VARIABLE}` references. For escaped newlines, a JSON-style double-quoted value without dollar signs is supported; actual multiline entries are rejected. See [CONFIGURATION.md](CONFIGURATION.md) for unified credentials and migration.
+
+From the deployment directory, stop the worker and verify the new prompt in a fresh container:
+
+```sh
+cd ~/telegram-mail-test
+sudo docker compose stop agent
+sudo docker compose run --rm --no-deps agent verify-model
+```
+
+After `MODEL_TOOL_LOOP_OK` and `MEMORY_OUTPUT_OK`, recreate the worker:
+
+```sh
+sudo docker compose up -d --no-build --force-recreate agent
+```
+
+On failure, correct the value or restore the previous one, verify again and then recreate. Webhook and ngrok can stay running during a prompt-only change. Recreating is required because editors may replace the file's inode; do not rely on `restart` to pick up a changed bind-mounted file.
+
+The application reads `.env` directly as a read-only mounted file, not through credential environment variables. Host-side setup commands read the local `.env` too. A nonblank file `SUMMARY_PROMPT` takes priority over an imported SQLite prompt and the credential-file/default prompt. Blank or absent values restore the existing fallback, which may be a previously imported prompt. The environment override does not overwrite SQLite settings or memory. Include `.env` in the off-host backup; a SQLite snapshot alone does not contain it.
+
+## Optional: import a prompt from GitHub
+
+Edit `prompts/summary.txt` in GitHub and commit it. Remove or blank `SUMMARY_PROMPT` in `.env` to let the imported prompt take effect. On the first use, clone into a separate source directory:
 
 ```sh
 git clone https://github.com/Tommy-Chen-NZ/telegram-mail-test.git ~/telegram-mail-source
 ```
 
-Authenticate privately when prompted. Do not put a GitHub token in the clone URL. If using a source checkout from the recovery procedure, switch it back to `main` before pulling:
+Then pull and import without rebuilding the image:
 
 ```sh
 git -C ~/telegram-mail-source switch main
 git -C ~/telegram-mail-source pull --ff-only origin main
-```
-
-The running release must support `set-prompt`. Deploy the first release containing this command through the normal image-pull process before importing. Later prompt-only edits do not require a new image or a local build.
-
-```sh
 cd ~/telegram-mail-test
 sudo docker compose stop agent
 python3 mailagent.py set-prompt ~/telegram-mail-source/prompts/summary.txt
 sudo docker compose run --rm --no-deps agent verify-model
 ```
 
-After `PROMPT_SAVED`, `MODEL_TOOL_LOOP_OK` and `MEMORY_OUTPUT_OK`, restart:
+After verification succeeds, recreate the worker using the command above. The import preserves the selected model, API credentials, mail progress and memory. Existing summaries waiting for Telegram retries are not rewritten. Imported settings are backed up in SQLite; an image rollback alone does not revert them.
 
-```sh
-sudo docker compose up -d --no-build agent
-```
-
-Do not restart after a failed import or verification; correct the prompt or restore its previous Git revision and repeat. Webhook ingestion and ngrok remain running while the worker is stopped. Received notifications remain queued in SQLite.
-
-The import preserves the selected model, endpoint, API credential file, mailbox progress and cross-email memory. It changes only the summary preferences stored in SQLite and requires model verification before restart. Newly generated summaries use the new prompt; existing summaries waiting for Telegram retries are not rewritten. Active prompt settings are included in SQLite backups. Rolling back the image alone does not roll back the imported prompt; reimport the desired file version.
-
-The summary file does not override the fixed tool permissions, memory size limit or email-safety instructions. Memory-update rules still live in `MEMORY_PROMPT` in `mailagent.py`; changing those requires a tested image release. A Git pull alone neither imports a prompt nor deploys new application code.
+Neither configuration method overrides fixed tool permissions or memory size limits. The memory-update rules remain in `MEMORY_PROMPT` in the application and require an image release to change. A Git pull alone neither imports a prompt nor deploys application code.

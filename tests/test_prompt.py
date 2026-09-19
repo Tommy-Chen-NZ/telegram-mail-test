@@ -1,6 +1,7 @@
 import contextlib
 import io
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -15,12 +16,15 @@ class PromptTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.paths = patch.multiple(a, DATA=self.root / 'data', SECRETS=self.root / 'secrets')
         self.paths.start()
+        self.environment = patch.dict(os.environ, {'SUMMARY_PROMPT': ''})
+        self.environment.start()
         self.db = a.connect()
         a.save_secret('model', {'endpoint': 'https://example.invalid/chat/completions',
                                'model': 'example', 'api_key': 'PRIVATE-KEY'})
 
     def tearDown(self):
         self.db.close()
+        self.environment.stop()
         self.paths.stop()
         self.temp.cleanup()
 
@@ -62,6 +66,32 @@ class PromptTests(unittest.TestCase):
             with self.assertRaisesRegex(a.Failure, 'worker_already_running'):
                 a.set_prompt(source)
         self.assertIsNone(a.meta(self.db, 'model_active'))
+
+    def test_environment_overrides_saved_prompt_without_changing_storage(self):
+        with self.db:
+            a.put(self.db, 'model_active', json.dumps({'model': 'selected',
+                  'endpoint': 'https://example.invalid/selected', 'prompt': 'Saved prompt',
+                  'credential_digest': a.credential_digest(a.secret('model'))}))
+        digest = a.fingerprint('model')
+        with self.db:
+            a.put(self.db, 'model_verified', digest)
+        with patch.dict(os.environ, {'SUMMARY_PROMPT': '  Environment prompt\nWith two lines.  '}):
+            cfg = a.model_config()
+            self.assertEqual(cfg['prompt'], 'Environment prompt\nWith two lines.')
+            self.assertEqual(cfg['model'], 'selected')
+            with self.assertRaisesRegex(a.Failure, 'verify_model_first'):
+                a.require_verified(self.db, 'model')
+        self.assertEqual(a.model_config()['prompt'], 'Saved prompt')
+        a.require_verified(self.db, 'model')
+        with patch.dict(os.environ, {'SUMMARY_PROMPT': '   '}):
+            self.assertEqual(a.model_config()['prompt'], 'Saved prompt')
+
+    def test_environment_prompt_validation_and_default_fallback(self):
+        self.assertEqual(a.model_config()['prompt'], a.DEFAULT_PROMPT)
+        for value, code in (('x' * 8193, 'prompt_too_large'), ('\u00e9' * 4097, 'prompt_too_large')):
+            with patch.dict(os.environ, {'SUMMARY_PROMPT': value}):
+                with self.assertRaisesRegex(a.Failure, code):
+                    a.model_config()
 
 
 if __name__ == '__main__':

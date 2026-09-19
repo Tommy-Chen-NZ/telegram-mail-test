@@ -8,6 +8,7 @@ tests
 frontend/node_modules
 .preview
 .env.*
+.env-*.tmp
 .deploy.lock
 .pull.lock
 releases
