@@ -70,7 +70,7 @@ def connect():
     CREATE INDEX IF NOT EXISTS webhook_pending ON webhook_events(processed);
     CREATE TABLE IF NOT EXISTS gmail_fetch(id TEXT PRIMARY KEY);
     ''')
-    # Serialize schema migration across the dashboard and worker processes.
+    # Serialize schema migration across the webhook and worker processes.
     with db:
         db.execute('BEGIN IMMEDIATE')
         columns = {r[1] for r in db.execute('PRAGMA table_info(jobs)')}

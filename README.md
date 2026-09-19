@@ -1,6 +1,6 @@
 # Mail Agent
 
-Gmail → English summary → Telegram. A standard-library Python mail worker, SQLite, and a static React console. The optional Pub/Sub receiver uses Google's authentication library. Designed for Ubuntu 24.04 with 512 MiB RAM and 512 MiB swap.
+Gmail → English summary → Telegram. A standard-library Python mail worker with SQLite and terminal-based management. The optional Pub/Sub receiver uses Google's authentication library. Designed for Ubuntu 24.04 with 512 MiB RAM and 512 MiB swap.
 
 Gmail push notifications on port 8080: see [WEBHOOK.md](WEBHOOK.md) for your 8005 → 8080 forwarding setup.
 
@@ -8,18 +8,17 @@ GitHub builds and publishes images; the server pulls a selected release and upda
 
 For a fixed HTTPS Pub/Sub endpoint through ngrok, see [NGROK.md](NGROK.md).
 
-**Target:** cand5, an LXC container nested in KVM. Default Docker networking fails with a sysctl permission error, so all services use host networking. The existing IMAP/model/Telegram pipeline has delivered test messages in 9.41 and 7.8 seconds, and authenticated Pub/Sub requests have returned HTTP 204 through ngrok. The new Gmail API reader, sustained latency, resource usage, off-host restore, and cand5 reboot recovery still require live validation. Application images are built in GitHub Actions and pulled by cand5.
+**Target:** cand5, an LXC container nested in KVM. Default Docker networking fails with a sysctl permission error, so all services use host networking. The existing IMAP/model/Telegram pipeline has delivered test messages in 9.41 and 7.8 seconds, and authenticated Pub/Sub requests have returned HTTP 204 through ngrok. The Gmail API reader recorded a 24.14-second test delivery, and the user confirmed receipt of a separate Telegram delivery check. Sustained latency, resource usage, off-host restore, and cand5 reboot recovery still require live validation. Application images are built in GitHub Actions and pulled by cand5.
 
-All Compose services use `network_mode: host` and share cand5's network namespace, not the outer KVM host's network. There are no `ports` mappings. Build steps also request host networking. The dashboard binds directly to `127.0.0.1:8787`; the webhook binds to `${WEBHOOK_BIND:-0.0.0.0}:8080`. SQLite persists in `./data`; credentials remain read-only at `/run/agent-secrets`. See [CAND5.md](CAND5.md) for staged host checks.
+All Compose services use `network_mode: host` and share cand5's network namespace, not the outer KVM host's network. There are no `ports` mappings. Build steps also request host networking. The webhook binds to `${WEBHOOK_BIND:-0.0.0.0}:8080`. SQLite persists in `./data`; credentials remain read-only at `/run/agent-secrets`. See [CAND5.md](CAND5.md) for staged host checks.
 
 ## Deployment
 
 Upload from your computer:
 
 ```sh
-ssh USER@HOST "mkdir -p ~/telegram-mail-test/frontend"
-scp -r Dockerfile compose.yaml requirements.txt mailagent.py dashboard.py demo_dashboard.py webhook.py prepare.sh README.md WEBHOOK.md CAND5.md tests USER@HOST:~/telegram-mail-test/
-scp -r frontend/dist USER@HOST:~/telegram-mail-test/frontend/
+ssh USER@HOST "mkdir -p ~/telegram-mail-test"
+scp -r Dockerfile compose.yaml requirements.txt mailagent.py gmail_api.py webhook.py prepare.sh README.md WEBHOOK.md CAND5.md tests USER@HOST:~/telegram-mail-test/
 ssh USER@HOST
 ```
 
@@ -79,7 +78,6 @@ Expected: `MODEL_TOOL_LOOP_OK: read_mail -> submit_summary` and an English summa
 ### 4. Services
 
 ```sh
-python3 dashboard.py setup
 sudo docker compose up -d --no-build
 sudo docker compose ps
 sudo docker compose exec -T agent python /app/mailagent.py health
@@ -87,30 +85,16 @@ sudo docker compose exec -T agent python /app/mailagent.py health
 
 Expected: `healthy` and `HEALTH_OK`. The services are configured to continue after SSH disconnect and restart after a VPS reboot; verify both on cand5 using the tests below. A manually stopped service needs `compose up -d` to enable it again.
 
-Memory limits: agent 160 MiB RAM / 224 MiB RAM plus swap; console 64 MiB RAM / 80 MiB RAM plus swap. Measure actual usage with `sudo docker stats --no-stream`. Node is not required on the VPS.
+Memory limits: agent 160 MiB RAM / 224 MiB RAM plus swap; webhook 64 MiB RAM / 80 MiB RAM plus swap; ngrok 64 MiB RAM / 96 MiB RAM plus swap. Measure actual usage with `sudo docker stats --no-stream`. There is no frontend or web management service.
 
-## Console
-
-From your computer:
+## Terminal management
 
 ```sh
-ssh -N -L 8787:127.0.0.1:8787 USER@HOST
+sudo docker compose exec -T agent python /app/mailagent.py status
+sudo docker compose logs --tail=30 agent webhook
 ```
 
-Open [Mail Agent](http://127.0.0.1:8787) and enter the dashboard password. The HTTP service is for local or SSH-tunneled access; do not expose it directly to the internet. Sessions expire after 12 hours or service restart.
-
-Pages: **Overview**, **Emails**, **Prompt**, **Model / API**, **Logs**.
-
-`Save draft` preserves the active configuration. `Test & apply` tests the tool loop with a synthetic email, using the configured API key, before activation. It incurs a small API call cost. New settings apply to the next summary; retries reuse existing summaries.
-
-Keys are entered only through `python3 mailagent.py setup-model`. The console never returns keys or raw email bodies. Update the key before switching providers. Reverify and reapply settings after changing credentials or restoring a backup.
-
-To start the console before configuring the agent:
-
-```sh
-python3 dashboard.py setup
-sudo docker compose up -d --build dashboard
-```
+Model keys and settings are entered through `python3 mailagent.py setup-model`, followed by `verify-model`. Existing active model and prompt settings in SQLite remain usable after removing the console. No application listener runs on port 8787.
 
 ## Live acceptance tests
 
@@ -182,7 +166,6 @@ python3 mailagent.py setup-gmail
 python3 mailagent.py verify-gmail
 python3 mailagent.py setup-model
 python3 mailagent.py verify-model
-python3 dashboard.py setup
 sudo docker compose up -d --build
 ```
 
@@ -191,20 +174,10 @@ Expected: `RESTORE_OK` and preserved progress. Restore requires an empty data di
 ## Development
 
 ```sh
-cd frontend
-npm ci
-npm run build
-cd ..
-python dashboard.py serve --demo
-```
-
-The read-only localhost demo uses sample data and makes no external API calls. Rebuild after frontend changes. Prebuilt files in `frontend/dist` let the VPS run without Node.
-
-```sh
 python -m unittest discover -s tests -v
 sudo docker compose config --quiet
 ```
 
-Tests cover crash recovery, deduplication, snapshots, retries, tool feedback, authentication, origin checks, and atomic settings activation. Mock API responses are not evidence of live delivery latency.
+Tests cover crash recovery, API history synchronization, deduplication, snapshots, retries, tool feedback, webhook authentication, and deployment migration. Mock API responses are not evidence of live delivery latency.
 
 References: [Telegram](https://core.telegram.org/bots/api#sendmessage), [Gmail IMAP](https://developers.google.com/workspace/gmail/imap/imap-extensions), [App passwords](https://support.google.com/mail/answer/185833), [Compose](https://docs.docker.com/reference/compose-file/services/).

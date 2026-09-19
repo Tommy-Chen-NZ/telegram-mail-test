@@ -39,6 +39,7 @@ with open(os.environ['TEST_CALLS'],'a') as log:
     log.write(json.dumps(args)+'\\n')
 if args[:1]==['ps']:
     if 'label=com.docker.compose.service=agent' in args: print('old-agent')
+    if 'label=com.docker.compose.service=dashboard' in args and os.environ.get('TEST_DASHBOARD')=='1': print('abc123def456')
 elif args[:1]==['compose'] and 'config' in args and '--format' in args:
     print(json.dumps({'services':{'agent':{'image':'old-image'}}}))
 elif args[:1]==['compose'] and 'up' in args:
@@ -55,9 +56,10 @@ sys.exit(0)
     def tearDown(self):
         self.temp.cleanup()
 
-    def run_deploy(self, fail=False):
+    def run_deploy(self, fail=False, dashboard=False):
         env = {**os.environ, 'PATH': str(self.bin) + os.pathsep + os.environ['PATH'],
-               'TEST_CALLS': str(self.calls), 'TEST_FAIL': '1' if fail else '0'}
+               'TEST_CALLS': str(self.calls), 'TEST_FAIL': '1' if fail else '0',
+               'TEST_DASHBOARD': '1' if dashboard else '0'}
         return subprocess.run(['bash', str(SCRIPT), str(self.root), SHA, IMAGE, 'false', 'telegram-mail-test'],
                               env=env, capture_output=True, text=True)
 
@@ -87,6 +89,32 @@ sys.exit(0)
         self.assertNotIn('dashboard', rollback)
         with sqlite3.connect(self.root / 'data' / 'agent.sqlite3') as db:
             self.assertEqual(db.execute('SELECT id FROM progress').fetchone()[0], 'already-sent')
+
+    def test_dashboard_removed_only_after_healthy_rollout_with_project_scope(self):
+        result = self.run_deploy(dashboard=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('DASHBOARD_REMOVED', result.stdout)
+        calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
+        removal = ['rm', '--force', 'abc123def456']
+        self.assertIn(removal, calls)
+        new_up = next(c for c in calls if 'up' in c)
+        self.assertNotIn('dashboard', new_up)
+        self.assertLess(calls.index(new_up), calls.index(removal))
+        lookup = next(c for c in calls if c[:2] == ['ps', '-aq'])
+        self.assertIn('label=com.docker.compose.project=telegram-mail-test', lookup)
+        self.assertIn('label=com.docker.compose.service=dashboard', lookup)
+        self.assertEqual((self.root / 'secrets' / 'model.json').read_text(), 'PRIVATE_CREDENTIAL')
+        with sqlite3.connect(self.root / 'data' / 'agent.sqlite3') as db:
+            self.assertEqual(db.execute('SELECT id FROM progress').fetchone()[0], 'already-sent')
+
+    def test_failed_rollout_preserves_dashboard_and_restores_previous_services(self):
+        result = self.run_deploy(fail=True, dashboard=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('ROLLBACK_OK', result.stdout)
+        calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
+        self.assertFalse(any(c[:1] == ['rm'] for c in calls))
+        rollback = next(c for c in calls if 'up' in c and any(a.endswith('compose.json') for a in c))
+        self.assertEqual(rollback[-2:], ['agent', 'dashboard'])
 
 
 if __name__ == '__main__':

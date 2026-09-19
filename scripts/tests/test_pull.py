@@ -22,8 +22,8 @@ class PullTests(unittest.TestCase):
         shutil.copy(SOURCE / 'scripts/pull-release.sh', self.root / 'scripts')
         self.bundle = self.root / 'bundle'
         (self.bundle / 'scripts').mkdir(parents=True)
-        for name in ('compose.yaml', 'prepare.sh', 'mailagent.py', 'dashboard.py',
-                     'demo_dashboard.py', 'webhook.py', 'gmail_api.py', 'requirements.txt'):
+        for name in ('compose.yaml', 'prepare.sh', 'mailagent.py',
+                     'webhook.py', 'gmail_api.py', 'requirements.txt'):
             shutil.copy(SOURCE / name, self.bundle / name)
         shutil.copy(SOURCE / 'scripts/pull-release.sh', self.bundle / 'scripts')
         (self.bundle / 'scripts/deploy-server.sh').write_text(

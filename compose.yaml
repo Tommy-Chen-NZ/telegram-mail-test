@@ -72,39 +72,3 @@ services:
       options:
         max-size: 2m
         max-file: "3"
-  dashboard:
-    build:
-      context: .
-      network: host
-    image: "${MAIL_AGENT_IMAGE:-mail-summary-agent:local}"
-    restart: unless-stopped
-    network_mode: host
-    init: true
-    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
-    entrypoint: [python, /app/dashboard.py]
-    command: [serve, --bind, 127.0.0.1, --port, "8787"]
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    mem_limit: 64m
-    memswap_limit: 80m
-    cpus: 0.25
-    pids_limit: 16
-    environment:
-      AGENT_DATA: /data
-      AGENT_SECRETS: /run/agent-secrets
-    volumes:
-      - ./data:/data
-      - ./secrets:/run/agent-secrets:ro
-    tmpfs:
-      - /tmp:size=4m,mode=1777
-    healthcheck:
-      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/api/session', timeout=3)"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    logging:
-      driver: json-file
-      options:
-        max-size: 1m
-        max-file: "2"

@@ -1,6 +1,6 @@
 # ngrok HTTPS ingress
 
-This publishes only the Gmail webhook on cand5 port 8080. The dashboard on port 8787 remains private. The tunnel uses a separate Compose project, host networking, restart unless-stopped, a digest-pinned official ngrok image, and a read-only mount containing only its own credential. No Google or application credentials are mounted into ngrok. The configured RAM limit is 64 MiB (96 MiB including swap); real cand5 memory use must be measured.
+This publishes only the Gmail webhook on cand5 port 8080. The tunnel uses a separate Compose project, host networking, restart unless-stopped, a digest-pinned official ngrok image, and a read-only mount containing only its own credential. No Google or application credentials are mounted into ngrok. The configured RAM limit is 64 MiB (96 MiB including swap); real cand5 memory use must be measured.
 
 Deployment account: use the same Linux account and project directory as the existing agent. Current Google Cloud project: `storied-precept-509003-e1`. Assigned public domain: `gully-gallantly-luckless.ngrok-free.dev`.
 

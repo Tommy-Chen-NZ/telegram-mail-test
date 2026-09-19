@@ -24,7 +24,7 @@ else
   engine=(sudo -n docker)
   "${engine[@]}" info >/dev/null
 fi
-services=(agent dashboard)
+services=(agent)
 previous_services=()
 for service in agent dashboard webhook; do
   running=$("${engine[@]}" ps -q --filter "label=com.docker.compose.project=$project" --filter "label=com.docker.compose.service=$service")
@@ -93,6 +93,13 @@ for helper in compose.ngrok.yaml ngrok_setup.py gmail_api.py; do
   if [[ -f "$release/$helper" ]]; then cp "$release/$helper" "$root/$helper"; fi
 done
 printf '%s\n' "$image" > "$root/deployed-image.txt"
+# Retire only this project's UI after a healthy rollout. Keep data and secrets.
+retired_dashboard=$("${engine[@]}" ps -aq --filter "label=com.docker.compose.project=$project" --filter label=com.docker.compose.service=dashboard)
+if [[ -n $retired_dashboard ]]; then
+  mapfile -t retired_ids <<< "$retired_dashboard"
+  "${engine[@]}" rm --force "${retired_ids[@]}"
+  echo 'DASHBOARD_REMOVED'
+fi
 echo 'DEPLOY_OK'
 "${engine[@]}" compose --project-directory "$root" --env-file "$root/.env" -p "$project" \
   -f "$root/compose.yaml" --profile webhook ps

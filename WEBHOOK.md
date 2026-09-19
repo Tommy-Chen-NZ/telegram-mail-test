@@ -4,7 +4,7 @@ For the selected ngrok HTTPS ingress, start with [NGROK.md](NGROK.md). It keeps 
 
 Endpoint: `POST /webhooks/gmail`, listening directly on **cand5:8080** with `network_mode: host`. Your existing forward is **8005 → 8080**. Compose has no `ports` mappings; containers share cand5's network namespace. The successful host-network hello-world test does not yet establish webhook or image-build readiness.
 
-The public URL must use HTTPS, for example `https://YOUR_HOST:8005/webhooks/gmail`. A plain TCP forward alone does not add TLS. Terminate HTTPS at your existing proxy or tunnel and forward HTTP to 8080. Preserve the Authorization header. The private dashboard remains separate on loopback port 8787.
+The public URL must use HTTPS, for example `https://YOUR_HOST:8005/webhooks/gmail`. A plain TCP forward alone does not add TLS. Terminate HTTPS at your existing proxy or tunnel and forward HTTP to 8080. Preserve the Authorization header.
 
 ## What this adds
 
@@ -55,9 +55,9 @@ curl -i http://127.0.0.1:8080/healthz
 
 Enter the public HTTPS URL, the push service-account email, and the complete subscription name (`projects/PROJECT/subscriptions/gmail-push`). Expected: `WEBHOOK_CONFIG_OK` and HTTP 200 from `/healthz`.
 
-Check `https://YOUR_HOST:8005/healthz` from outside the VPS. HTTP 200 confirms forwarding and TLS only. An unsigned POST to `/webhooks/gmail` must return 401. The webhook container has a 64 MiB RAM limit; all three containers together have configured RAM limits totaling 288 MiB. Actual usage still needs VPS measurement.
+Check `https://YOUR_HOST:8005/healthz` from outside the VPS. HTTP 200 confirms forwarding and TLS only. An unsigned POST to `/webhooks/gmail` must return 401. The webhook container has a 64 MiB RAM limit; the worker and webhook together have configured RAM limits totaling 224 MiB (288 MiB including the separate ngrok container). Actual usage still needs VPS measurement.
 
-For a reverse proxy running inside cand5, optionally set `WEBHOOK_BIND=127.0.0.1` in `.env`. This controls the application listener itself. The default is `0.0.0.0` to support your external port forward. Keep the public HTTPS proxy as the intended ingress. The dashboard explicitly listens on `127.0.0.1:8787` even with host networking.
+For a reverse proxy running inside cand5, optionally set `WEBHOOK_BIND=127.0.0.1` in `.env`. This controls the application listener itself. The default is `0.0.0.0` to support your external port forward. Keep the public HTTPS proxy as the intended ingress.
 
 ## 3. Create the push subscription
 

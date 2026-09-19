@@ -21,20 +21,10 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
       - name: Install test dependencies
         run: python -m pip install -r requirements.txt
       - name: Test without production credentials
         run: python -m unittest discover -s tests -v
-      - name: Build React
-        working-directory: frontend
-        run: |
-          npm ci
-          npm run build
       - name: Validate Compose and deployment scripts
         run: |
           docker compose --profile webhook config --format json | python scripts/check_compose.py
@@ -57,6 +47,9 @@ jobs:
           test -f "$RUNNER_TEMP/deployment/ngrok_setup.py"
           cmp gmail_api.py "$RUNNER_TEMP/deployment/gmail_api.py"
           docker run --rm --network host --entrypoint python mail-summary-agent:ci -c 'import mailagent; assert mailagent.gmail_api_client().__class__.__name__ == "GmailAPI"'
+          docker run --rm --network host --entrypoint python mail-summary-agent:ci -c 'from pathlib import Path; assert not Path("/app/dashboard.py").exists(); assert not Path("/app/frontend").exists()'
+          test -f "$RUNNER_TEMP/deployment/dashboard.py"
+          test -f "$RUNNER_TEMP/deployment/demo_dashboard.py"
 
   publish:
     needs: checks
@@ -73,16 +66,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - name: Build React
-        working-directory: frontend
-        run: |
-          npm ci
-          npm run build
       - name: Image name
         id: image
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"

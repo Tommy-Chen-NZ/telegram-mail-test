@@ -48,12 +48,12 @@ if [[ $mode == prepare ]]; then
   cp "$release/prepare.sh" "$root/prepare.sh"
   sh "$root/prepare.sh"
   printf 'MAIL_AGENT_IMAGE=%s\nCOMPOSE_PROJECT_NAME=%s\n' "$digest" "$project" >> .env
-  echo 'PULL_READY: configure and verify Telegram, Gmail, model, and dashboard before deploy.'
+  echo 'PULL_READY: configure and verify Telegram, Gmail, and model before deploy.'
 else
   bash "$release/scripts/deploy-server.sh" "$root" "$revision" "$digest" "$webhook" "$project"
 fi
 # Keep terminal setup tools aligned with the chosen application release.
-for file in mailagent.py dashboard.py demo_dashboard.py webhook.py requirements.txt prepare.sh; do
+for file in mailagent.py webhook.py requirements.txt prepare.sh; do
   cp "$release/$file" "$root/$file"
 done
 cp "$release/scripts/deploy-server.sh" "$root/scripts/deploy-server.sh"

@@ -1,6 +1,6 @@
 # Server-pull deployment
 
-GitHub Actions tests the application, builds React and publishes AMD64/ARM64 images. The server pulls a selected release; GitHub never connects to cand5. No SSH secrets, deployment environment variables, or self-hosted runner are needed. The old cand5 environment can remain unused.
+GitHub Actions tests the application and publishes AMD64/ARM64 images. The server pulls a selected release; GitHub never connects to cand5. No SSH secrets, deployment environment variables, or self-hosted runner are needed. The old cand5 environment can remain unused.
 
 Push to main or run **Test and publish** manually. Wait for both checks and publish to pass. Use the exact image digest from that run's summary (preferred), or its full `sha-COMMIT` tag. There is no automatic latest-version rollout.
 
@@ -49,7 +49,7 @@ python3 mailagent.py setup-telegram
 sudo docker compose run --rm --no-deps agent verify-telegram
 ```
 
-Expected: `TELEGRAM_SEND_OK` and an actual test message in Telegram. Enter the bot token only at the hidden setup prompt. Continue with Gmail, model, and dashboard setup in [CAND5.md](CAND5.md), skipping its local build step because the image is already downloaded. Start the services only after credential verification succeeds. Gmail Pub/Sub setup is documented in [WEBHOOK.md](WEBHOOK.md).
+Expected: `TELEGRAM_SEND_OK` and an actual test message in Telegram. Enter the bot token only at the hidden setup prompt. Continue with Gmail and model setup in [CAND5.md](CAND5.md), skipping its local build step because the image is already downloaded. Start the services only after credential verification succeeds. Gmail Pub/Sub setup is documented in [WEBHOOK.md](WEBHOOK.md).
 
 `docker compose run` does not accept `--no-build`; use that flag only with supported commands such as `up`. If Gmail setup reports `verify_telegram_first`, rerun the Telegram verification above from the project directory and confirm `TELEGRAM_SEND_OK` before continuing. Saving a bot token alone does not record a successful verification.
 
@@ -57,7 +57,7 @@ Expected: `TELEGRAM_SEND_OK` and an actual test message in Telegram. Enter the b
 bash scripts/pull-release.sh "$IMAGE" deploy
 ```
 
-Expected: `DEPLOY_OK` and healthy services. Use `deploy true` only after configuring the webhook. All services use host networking, no ports mapping, persistent SQLite, read-only mounted credentials, and restart unless-stopped. The dashboard stays on loopback port 8787; the webhook uses 8080.
+Expected: `DEPLOY_OK` and healthy services. Use `deploy true` only after configuring the webhook. All services use host networking, no ports mapping, persistent SQLite, read-only mounted credentials, and restart unless-stopped. The webhook uses port 8080; there is no management frontend.
 
 ## 4. Subsequent updates
 
@@ -77,3 +77,5 @@ Do not extract a bundle directly over an existing deployment; use pull-release.s
 Pipeline success does not verify cand5 network access, its memory limits, 60-second delivery or reboot recovery. Complete the live tests in [CAND5.md](CAND5.md). Updates are manual for now; no timer is installed.
 
 Reference: [GitHub Container registry authentication](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
+
+On upgrade from a release with a dashboard, a healthy rollout removes only containers labelled as the dashboard service in the selected Compose project. SQLite, credentials, ngrok, and unrelated containers are preserved. A failed rollout retains the old dashboard for rollback. Two inert dashboard command notices remain in the image deployment bundle solely for compatibility with previously installed pull scripts; the application image has no frontend or dashboard server.

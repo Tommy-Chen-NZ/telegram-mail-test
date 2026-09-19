@@ -6,15 +6,16 @@ Target: LXC nested inside KVM. Docker Compose remains the deployment method.
 | --- | --- |
 | Basic container with host networking | Passed, reported by user: `docker run --rm --network host hello-world` |
 | Application image build | Not yet tested on cand5 |
-| Application startup and resource limits | Not yet tested on cand5 |
+| Application startup | Healthy containers reported by user |
+| Resource limits | Actual usage still needs measurement |
 | Container → Telegram | Not yet tested on cand5 |
 | Container → Gmail | Not yet tested on cand5 |
 | Container → model API | Not yet tested on cand5 |
-| Public webhook and signed Pub/Sub delivery | Not yet tested on cand5 |
-| Delivery within 60 seconds | Not yet tested on cand5 |
+| Public webhook and signed Pub/Sub delivery | Authenticated HTTP 204 observed through ngrok |
+| Delivery within 60 seconds | One API-mode delivery recorded at 24.14 seconds; repeat after restart |
 | SSH disconnect and server reboot recovery | Not yet tested on cand5 |
 
-The locally validated Compose configuration requests host networking for builds and all three services, has no `ports` entries, and retains `restart: unless-stopped`. The shared network is **cand5's**, not the outer KVM host's. No privileged mode, extra capabilities, or sysctl overrides are added.
+The locally validated Compose configuration requests host networking for builds and both application services, has no `ports` entries, and retains `restart: unless-stopped`. The shared network is **cand5's**, not the outer KVM host's. No privileged mode, extra capabilities, or sysctl overrides are added.
 
 ## 1. Build
 
@@ -48,14 +49,13 @@ Success markers, in order: `TELEGRAM_SEND_OK` plus the Telegram test message, `G
 ## 3. Start
 
 ```sh
-python3 dashboard.py setup
 sudo docker compose up -d --no-build
 sudo docker compose ps
 sudo docker compose exec -T agent python /app/mailagent.py health
 sudo docker stats --no-stream
 ```
 
-Success: running services become healthy and the worker returns `HEALTH_OK`. The dashboard listens on cand5 loopback at `127.0.0.1:8787`. Use the existing SSH tunnel to access it. The agent has no inbound listener. Configure the webhook separately using [WEBHOOK.md](WEBHOOK.md); it listens on cand5 port 8080 for your external 8005 → 8080 forward.
+Success: running services become healthy and the worker returns `HEALTH_OK`. The agent has no inbound listener. Configure the webhook separately using [WEBHOOK.md](WEBHOOK.md); it listens on cand5 port 8080 for your external 8005 → 8080 forward.
 
 All containers retain the same `./data:/data` bind mount for SQLite and `./secrets:/run/agent-secrets:ro` for credentials. `prepare.sh` sets directory permissions and runtime UID/GID while preserving other `.env` entries, including the deployed image and webhook bind address. Run it as the same account that owns the deployment files.
 
